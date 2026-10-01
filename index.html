@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="Cosmic Fury - An epic space shooter arcade game with stunning visuals and intense gameplay">
+    <title>Cosmic Fury - Space Shooter Arcade</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;900&family=Rajdhani:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="game-container">
+        <!-- Animated Background -->
+        <div class="stars-layer" id="stars1"></div>
+        <div class="stars-layer" id="stars2"></div>
+        <div class="stars-layer" id="stars3"></div>
+
+        <!-- Game Canvas -->
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- Top HUD -->
+        <div id="hud">
+            <div class="hud-left">
+                <button id="hud-home-btn" class="hud-icon-btn" title="Home (ESC)">🏠</button>
+            </div>
+            <div class="hud-item" id="score-container">
+                <span class="hud-label">SCORE</span>
+                <span class="hud-value" id="score">0</span>
+            </div>
+            <div class="hud-item" id="wave-container">
+                <span class="hud-label">WAVE</span>
+                <span class="hud-value" id="wave">1</span>
+            </div>
+            <div class="hud-item" id="points-container">
+                <span class="hud-label">⭐ POINTS</span>
+                <span class="hud-value" id="hud-points">0</span>
+            </div>
+            <div class="hud-item" id="level-container">
+                <span class="hud-label">LEVEL <span id="player-level">1</span></span>
+                <div class="xp-bar">
+                    <div class="xp-fill" id="xp-fill"></div>
+                </div>
+            </div>
+            <div class="hud-item" id="health-container">
+                <span class="hud-label">SHIELD</span>
+                <div class="health-bar">
+                    <div class="health-fill" id="health-fill"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Combo Counter -->
+        <div id="combo-container" class="hidden">
+            <span class="combo-text">COMBO</span>
+            <span class="combo-value" id="combo-value">x1</span>
+        </div>
+
+        <!-- Boss Health Bar -->
+        <div id="boss-health-container" class="hidden">
+            <span class="boss-name" id="boss-name">BOSS</span>
+            <div class="boss-health-bar">
+                <div class="boss-health-fill" id="boss-health-fill"></div>
+            </div>
+        </div>
+
+        <!-- Mobile Touch Controls -->
+        <div id="mobile-controls" class="mobile-controls">
+            <div class="mobile-controls-left">
+                <button id="touch-left" class="touch-btn touch-left">◀</button>
+                <button id="touch-right" class="touch-btn touch-right">▶</button>
+            </div>
+            <div class="mobile-controls-right">
+                <button id="touch-fire" class="touch-btn touch-fire">🔥</button>
+            </div>
+        </div>
+
+        <!-- Special Abilities Bar -->
+        <div id="abilities-bar">
+            <div class="ability-slot" id="ability-bomb" data-ability="bomb">
+                <div class="ability-icon">💥</div>
+                <div class="ability-key">1</div>
+                <div class="ability-cooldown" id="cooldown-bomb"></div>
+                <div class="ability-locked" id="locked-bomb">LVL 1</div>
+            </div>
+            <div class="ability-slot" id="ability-slowmo" data-ability="slowmo">
+                <div class="ability-icon">⏱️</div>
+                <div class="ability-key">2</div>
+                <div class="ability-cooldown" id="cooldown-slowmo"></div>
+                <div class="ability-locked" id="locked-slowmo">LVL 3</div>
+            </div>
+            <div class="ability-slot" id="ability-laser" data-ability="laser">
+                <div class="ability-icon">⚡</div>
+                <div class="ability-key">3</div>
+                <div class="ability-cooldown" id="cooldown-laser"></div>
+                <div class="ability-locked" id="locked-laser">LVL 5</div>
+            </div>
+        </div>
+
+        <!-- Audio Settings Button -->
+        <button id="audio-toggle" class="icon-btn" title="Toggle Audio">
+            <span id="audio-icon">🔊</span>
+        </button>
+
+        <!-- Achievement Popup -->
+        <div id="achievement-popup" class="hidden">
+            <div class="achievement-icon">🏆</div>
+            <div class="achievement-content">
+                <span class="achievement-title" id="achievement-title">Achievement Unlocked!</span>
+                <span class="achievement-name" id="achievement-name">First Blood</span>
+            </div>
+        </div>
+
+        <!-- Level Up Popup -->
+        <div id="levelup-popup" class="hidden">
+            <span class="levelup-text">LEVEL UP!</span>
+            <span class="levelup-level" id="levelup-level">Level 2</span>
+        </div>
+
+        <!-- Boss Warning -->
+        <div id="boss-warning" class="hidden">
+            <span class="warning-text">⚠️ BOSS INCOMING ⚠️</span>
+        </div>
+
+        <!-- Profile Selection Screen -->
+        <div id="profile-screen" class="overlay-screen">
+            <div class="screen-content profile-content">
+                <h1 class="profile-title">
+                    <span class="title-word">SELECT</span>
+                    <span class="title-word accent">PILOT</span>
+                </h1>
+                <p class="profile-subtitle">Choose your profile or create a new one</p>
+
+                <div class="profiles-list" id="profiles-list">
+                    <!-- Profiles will be populated by JavaScript -->
+                </div>
+
+                <div class="create-profile-form" id="create-profile-form">
+                    <input type="text" id="new-profile-name" class="profile-input" placeholder="Enter pilot name..."
+                        maxlength="15">
+                    <button id="create-profile-btn" class="glow-btn">
+                        <span>✨ CREATE PILOT</span>
+                        <div class="btn-glow"></div>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Start Screen -->
+        <div id="start-screen" class="overlay-screen hidden">
+            <div class="screen-content">
+                <h1 class="game-title">
+                    <span class="title-word">COSMIC</span>
+                    <span class="title-word accent">FURY</span>
+                </h1>
+                <p class="subtitle">DEFEND THE GALAXY</p>
+
+                <!-- Current Profile Display -->
+                <div class="current-profile-display">
+                    <span class="profile-label">PILOT:</span>
+                    <span class="profile-name" id="current-profile-name">---</span>
+                    <button id="switch-profile-btn" class="switch-profile-btn" title="Switch Profile">🔄</button>
+                </div>
+
+                <div class="divider"></div>
+                <div class="instructions">
+                    <div class="instruction-item">
+                        <span class="key">← →</span>
+                        <span class="action">MOVE</span>
+                    </div>
+                    <div class="instruction-item">
+                        <span class="key">SPACE</span>
+                        <span class="action">FIRE</span>
+                    </div>
+                    <div class="instruction-item">
+                        <span class="key">Q / E</span>
+                        <span class="action">WEAPON</span>
+                    </div>
+                    <div class="instruction-item">
+                        <span class="key">1-4</span>
+                        <span class="action">ABILITIES</span>
+                    </div>
+                </div>
+
+                <!-- Game Mode Selection -->
+                <div class="mode-selection">
+                    <button id="mode-arcade" class="mode-btn active" data-mode="arcade">
+                        🎮 ARCADE
+                    </button>
+                    <button id="mode-endless" class="mode-btn" data-mode="endless">
+                        ♾️ ENDLESS
+                    </button>
+                    <button id="mode-daily" class="mode-btn" data-mode="daily">
+                        📅 DAILY
+                    </button>
+                </div>
+
+                <button id="start-btn" class="glow-btn">
+                    <span>START MISSION</span>
+                    <div class="btn-glow"></div>
+                </button>
+                <div class="menu-buttons-row">
+                    <button id="upgrades-btn" class="glow-btn secondary">
+                        <span>⚙️ UPGRADES</span>
+                        <div class="btn-glow"></div>
+                    </button>
+                    <button id="skins-btn" class="glow-btn secondary">
+                        <span>🎨 SKINS</span>
+                        <div class="btn-glow"></div>
+                    </button>
+                </div>
+                <div class="menu-buttons-row">
+                    <button id="stats-btn" class="glow-btn secondary small">
+                        <span>📊 STATS</span>
+                        <div class="btn-glow"></div>
+                    </button>
+                    <button id="leaderboard-btn" class="glow-btn secondary small">
+                        <span>🏆 SCORES</span>
+                        <div class="btn-glow"></div>
+                    </button>
+                    <button id="settings-btn" class="glow-btn secondary small">
+                        <span>⚙️ SETTINGS</span>
+                        <div class="btn-glow"></div>
+                    </button>
+                </div>
+                <p class="highscore-text">HIGH SCORE: <span id="highscore-display">0</span></p>
+                <p class="player-stats">PILOT LEVEL: <span id="menu-player-level">1</span> | POINTS: <span
+                        id="menu-points">0</span> | PRESTIGE: ⭐<span id="menu-prestige">0</span></p>
+            </div>
+        </div>
+
+        <!-- Upgrade Shop Screen -->
+        <div id="upgrade-screen" class="overlay-screen hidden">
+            <div class="screen-content upgrade-content">
+                <h2 class="upgrade-title">⚙️ UPGRADES</h2>
+                <p class="points-display">POINTS: <span id="upgrade-points">0</span></p>
+
+                <div class="upgrades-grid">
+                    <div class="upgrade-item" data-upgrade="fireRate">
+                        <div class="upgrade-icon">🔥</div>
+                        <div class="upgrade-info">
+                            <span class="upgrade-name">Fire Rate</span>
+                            <span class="upgrade-desc">Shoot faster</span>
+                            <div class="upgrade-level">
+                                <span class="level-dots" id="level-fireRate">○○○○○</span>
+                            </div>
+                        </div>
+                        <button class="upgrade-buy-btn" id="buy-fireRate">
+                            <span class="upgrade-cost">500</span>
+                        </button>
+                    </div>
+
+                    <div class="upgrade-item" data-upgrade="damage">
+                        <div class="upgrade-icon">💥</div>
+                        <div class="upgrade-info">
+                            <span class="upgrade-name">Damage</span>
+                            <span class="upgrade-desc">Deal more damage</span>
+                            <div class="upgrade-level">
+                                <span class="level-dots" id="level-damage">○○○○○</span>
+                            </div>
+                        </div>
+                        <button class="upgrade-buy-btn" id="buy-damage">
+                            <span class="upgrade-cost">500</span>
+                        </button>
+                    </div>
+
+                    <div class="upgrade-item" data-upgrade="shield">
+                        <div class="upgrade-icon">🛡️</div>
+                        <div class="upgrade-info">
+                            <span class="upgrade-name">Max Shield</span>
+                            <span class="upgrade-desc">+25 max health</span>
+                            <div class="upgrade-level">
+                                <span class="level-dots" id="level-shield">○○○○○</span>
+                            </div>
+                        </div>
+                        <button class="upgrade-buy-btn" id="buy-shield">
+                            <span class="upgrade-cost">500</span>
+                        </button>
+                    </div>
+
+                    <div class="upgrade-item" data-upgrade="speed">
+                        <div class="upgrade-icon">⚡</div>
+                        <div class="upgrade-info">
+                            <span class="upgrade-name">Speed</span>
+                            <span class="upgrade-desc">Move faster</span>
+                            <div class="upgrade-level">
+                                <span class="level-dots" id="level-speed">○○○○○</span>
+                            </div>
+                        </div>
+                        <button class="upgrade-buy-btn" id="buy-speed">
+                            <span class="upgrade-cost">500</span>
+                        </button>
+                    </div>
+
+                    <div class="upgrade-item" data-upgrade="magnet">
+                        <div class="upgrade-icon">🧲</div>
+                        <div class="upgrade-info">
+                            <span class="upgrade-name">Magnet</span>
+                            <span class="upgrade-desc">Attract power-ups</span>
+                            <div class="upgrade-level">
+                                <span class="level-dots" id="level-magnet">○○○○○</span>
+                            </div>
+                        </div>
+                        <button class="upgrade-buy-btn" id="buy-magnet">
+                            <span class="upgrade-cost">750</span>
+                        </button>
+                    </div>
+
+                    <div class="upgrade-item" data-upgrade="luck">
+                        <div class="upgrade-icon">🍀</div>
+                        <div class="upgrade-info">
+                            <span class="upgrade-name">Lucky</span>
+                            <span class="upgrade-desc">+2% power-up drop rate</span>
+                            <div class="upgrade-level">
+                                <span class="level-dots" id="level-luck">○○○○○○○○○○</span>
+                            </div>
+                        </div>
+                        <button class="upgrade-buy-btn" id="buy-luck">
+                            <span class="upgrade-cost">600</span>
+                        </button>
+                    </div>
+
+                    <div class="upgrade-item" data-upgrade="critical">
+                        <div class="upgrade-icon">🎯</div>
+                        <div class="upgrade-info">
+                            <span class="upgrade-name">Critical Hit</span>
+                            <span class="upgrade-desc">+5% crit chance (2x damage)</span>
+                            <div class="upgrade-level">
+                                <span class="level-dots" id="level-critical">○○○○○○○○○○</span>
+                            </div>
+                        </div>
+                        <button class="upgrade-buy-btn" id="buy-critical">
+                            <span class="upgrade-cost">800</span>
+                        </button>
+                    </div>
+
+                    <div class="upgrade-item" data-upgrade="armor">
+                        <div class="upgrade-icon">🔰</div>
+                        <div class="upgrade-info">
+                            <span class="upgrade-name">Armor</span>
+                            <span class="upgrade-desc">-5% damage taken</span>
+                            <div class="upgrade-level">
+                                <span class="level-dots" id="level-armor">○○○○○○○○○○</span>
+                            </div>
+                        </div>
+                        <button class="upgrade-buy-btn" id="buy-armor">
+                            <span class="upgrade-cost">800</span>
+                        </button>
+                    </div>
+
+                    <div class="upgrade-item" data-upgrade="xpBoost">
+                        <div class="upgrade-icon">📈</div>
+                        <div class="upgrade-info">
+                            <span class="upgrade-name">XP Boost</span>
+                            <span class="upgrade-desc">+10% XP gain</span>
+                            <div class="upgrade-level">
+                                <span class="level-dots" id="level-xpBoost">○○○○○○○○○○</span>
+                            </div>
+                        </div>
+                        <button class="upgrade-buy-btn" id="buy-xpBoost">
+                            <span class="upgrade-cost">1000</span>
+                        </button>
+                    </div>
+
+                    <div class="upgrade-item" data-upgrade="pointBoost">
+                        <div class="upgrade-icon">💎</div>
+                        <div class="upgrade-info">
+                            <span class="upgrade-name">Point Boost</span>
+                            <span class="upgrade-desc">+8% points earned</span>
+                            <div class="upgrade-level">
+                                <span class="level-dots" id="level-pointBoost">○○○○○○○○○○</span>
+                            </div>
+                        </div>
+                        <button class="upgrade-buy-btn" id="buy-pointBoost">
+                            <span class="upgrade-cost">1000</span>
+                        </button>
+                    </div>
+                </div>
+
+                <button id="close-upgrades-btn" class="glow-btn">
+                    <span>BACK</span>
+                    <div class="btn-glow"></div>
+                </button>
+            </div>
+        </div>
+
+        <!-- Skin Shop Screen -->
+        <div id="skin-screen" class="overlay-screen hidden">
+            <div class="screen-content skin-content">
+                <h2 class="skin-title">🎨 SHIP SKINS</h2>
+                <p class="skin-points-info">YOUR POINTS: ⭐ <span id="skin-points">0</span></p>
+
+                <div class="skins-grid" id="skins-grid">
+                    <!-- Skins will be generated by JavaScript -->
+                </div>
+
+                <button id="close-skins-btn" class="glow-btn">
+                    <span>BACK</span>
+                    <div class="btn-glow"></div>
+                </button>
+            </div>
+        </div>
+
+        <!-- Game Over Screen -->
+        <div id="gameover-screen" class="overlay-screen hidden">
+            <div class="screen-content">
+                <h2 class="gameover-title">MISSION FAILED</h2>
+                <div class="final-stats">
+                    <div class="stat-item">
+                        <span class="stat-label">FINAL SCORE</span>
+                        <span class="stat-value" id="final-score">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">WAVES SURVIVED</span>
+                        <span class="stat-value" id="final-wave">1</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">ENEMIES DESTROYED</span>
+                        <span class="stat-value" id="final-enemies">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">MAX COMBO</span>
+                        <span class="stat-value" id="final-combo">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">XP EARNED</span>
+                        <span class="stat-value" id="final-xp">0</span>
+                    </div>
+                </div>
+                <div class="new-highscore hidden" id="new-highscore">
+                    <span>★ NEW HIGH SCORE ★</span>
+                </div>
+                <button id="restart-btn" class="glow-btn">
+                    <span>TRY AGAIN</span>
+                    <div class="btn-glow"></div>
+                </button>
+            </div>
+        </div>
+
+        <!-- Pause Overlay -->
+        <div id="pause-screen" class="overlay-screen hidden">
+            <div class="screen-content">
+                <h2 class="pause-title">PAUSED</h2>
+                <div class="pause-buttons">
+                    <button id="resume-btn" class="glow-btn">
+                        <span>▶️ RESUME</span>
+                        <div class="btn-glow"></div>
+                    </button>
+                    <button id="pause-restart-btn" class="glow-btn secondary">
+                        <span>🔄 RESTART</span>
+                        <div class="btn-glow"></div>
+                    </button>
+                    <button id="home-btn" class="glow-btn danger">
+                        <span>🏠 HOME</span>
+                        <div class="btn-glow"></div>
+                    </button>
+                </div>
+                <p class="pause-hint">Press ESC to resume</p>
+            </div>
+        </div>
+
+        <!-- Stats Screen -->
+        <div id="stats-screen" class="overlay-screen hidden">
+            <div class="screen-content stats-content">
+                <h2 class="stats-title">📊 PILOT STATISTICS</h2>
+                <div class="stats-grid">
+                    <div class="stat-box">
+                        <span class="stat-icon">💀</span>
+                        <span class="stat-num" id="stat-kills">0</span>
+                        <span class="stat-label">Total Kills</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-icon">🎮</span>
+                        <span class="stat-num" id="stat-games">0</span>
+                        <span class="stat-label">Games Played</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-icon">🏆</span>
+                        <span class="stat-num" id="stat-highwave">0</span>
+                        <span class="stat-label">Highest Wave</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-icon">🔥</span>
+                        <span class="stat-num" id="stat-combo">0</span>
+                        <span class="stat-label">Best Combo</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-icon">👹</span>
+                        <span class="stat-num" id="stat-bosses">0</span>
+                        <span class="stat-label">Bosses Defeated</span>
+                    </div>
+                    <div class="stat-box">
+                        <span class="stat-icon">⏱️</span>
+                        <span class="stat-num" id="stat-time">0h</span>
+                        <span class="stat-label">Play Time</span>
+                    </div>
+                </div>
+                <button id="close-stats-btn" class="glow-btn">
+                    <span>BACK</span>
+                    <div class="btn-glow"></div>
+                </button>
+            </div>
+        </div>
+
+        <!-- Leaderboard Screen -->
+        <div id="leaderboard-screen" class="overlay-screen hidden">
+            <div class="screen-content leaderboard-content">
+                <h2 class="leaderboard-title">🏆 LEADERBOARD</h2>
+                <div class="leaderboard-list" id="leaderboard-list">
+                    <div class="leaderboard-header">
+                        <span>#</span><span>NAME</span><span>SCORE</span><span>WAVE</span>
+                    </div>
+                    <!-- Entries will be populated by JS -->
+                </div>
+                <div class="leaderboard-buttons">
+                    <button id="refresh-scores-btn" class="glow-btn secondary small">
+                        <span>🔄 REFRESH</span>
+                        <div class="btn-glow"></div>
+                    </button>
+                    <button id="clear-scores-btn" class="glow-btn danger small">
+                        <span>🗑️ CLEAR ALL</span>
+                        <div class="btn-glow"></div>
+                    </button>
+                    <button id="close-leaderboard-btn" class="glow-btn small">
+                        <span>BACK</span>
+                        <div class="btn-glow"></div>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Screen -->
+        <div id="settings-screen" class="overlay-screen hidden">
+            <div class="screen-content settings-content">
+                <h2 class="settings-title">⚙️ SETTINGS</h2>
+                <div class="settings-list">
+                    <div class="setting-item">
+                        <span class="setting-label">Screen Shake</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-shake" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <span class="setting-label">Damage Numbers</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-dmgnums" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <span class="setting-label">Auto-Fire</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-autofire">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <span class="setting-label">Particles</span>
+                        <select id="setting-particles" class="setting-select">
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high" selected>High</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="settings-danger-zone">
+                    <p class="danger-zone-label">DANGER ZONE</p>
+                    <button id="reset-btn" class="glow-btn danger">
+                        <span>🔄 RESET PROGRESS</span>
+                        <div class="btn-glow"></div>
+                    </button>
+                </div>
+
+                <button id="close-settings-btn" class="glow-btn">
+                    <span>BACK</span>
+                    <div class="btn-glow"></div>
+                </button>
+            </div>
+        </div>
+
+        <!-- Weapon Indicator (HUD) -->
+        <div id="weapon-indicator" class="hidden">
+            <span class="weapon-icon" id="weapon-icon">⚡</span>
+            <span class="weapon-name" id="weapon-name">Laser</span>
+            <span class="weapon-hint">[Q/E]</span>
+        </div>
+    </div>
+
+    <script src="audio.js"></script>
+    <script src="game.js"></script>
+</body>
+
+</html>
