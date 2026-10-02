@@ -117,6 +117,16 @@
             </div>
         </div>
 
+        <!-- Mission Popup -->
+        <div id="mission-popup" class="hidden">
+            <div class="achievement-icon">🎯</div>
+            <div class="achievement-content">
+                <span class="achievement-title">Mission Complete!</span>
+                <span class="achievement-name" id="mission-popup-name">Eliminate Threats</span>
+                <span class="mission-popup-reward" id="mission-popup-reward">+250 XP</span>
+            </div>
+        </div>
+
         <!-- Level Up Popup -->
         <div id="levelup-popup" class="hidden">
             <span class="levelup-text">LEVEL UP!</span>
@@ -206,6 +216,10 @@
                     <div class="btn-glow"></div>
                 </button>
                 <div class="menu-buttons-row">
+                    <button id="missions-btn" class="glow-btn secondary">
+                        <span>🎯 MISSIONS</span>
+                        <div class="btn-glow"></div>
+                    </button>
                     <button id="upgrades-btn" class="glow-btn secondary">
                         <span>⚙️ UPGRADES</span>
                         <div class="btn-glow"></div>
@@ -456,6 +470,10 @@
                         <span>▶️ RESUME</span>
                         <div class="btn-glow"></div>
                     </button>
+                    <button id="pause-missions-btn" class="glow-btn secondary">
+                        <span>🎯 MISSIONS</span>
+                        <div class="btn-glow"></div>
+                    </button>
                     <button id="pause-restart-btn" class="glow-btn secondary">
                         <span>🔄 RESTART</span>
                         <div class="btn-glow"></div>
@@ -584,6 +602,23 @@
                 </div>
 
                 <button id="close-settings-btn" class="glow-btn">
+                    <span>BACK</span>
+                    <div class="btn-glow"></div>
+                </button>
+            </div>
+        </div>
+
+        <!-- Missions Screen -->
+        <div id="missions-screen" class="overlay-screen hidden">
+            <div class="screen-content missions-content">
+                <h2 class="missions-title">🎯 MISSIONS</h2>
+                <p class="missions-subtitle">COMPLETE OBJECTIVES TO EARN XP</p>
+
+                <div class="missions-list" id="missions-list">
+                    <!-- Populated by JavaScript -->
+                </div>
+
+                <button id="close-missions-btn" class="glow-btn">
                     <span>BACK</span>
                     <div class="btn-glow"></div>
                 </button>

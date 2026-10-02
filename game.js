@@ -268,6 +268,12 @@ let ultimateActive = false;
 let achievements = {};
 let achievementQueue = [];
 
+// Mission System V1
+let missions = {};
+let missionQueue = [];
+let previousMissionsScreen = 'start';
+let gameStartTime = 0;
+
 // Points & Upgrades System - EXPANDED
 let points = 0;
 let upgrades = {
@@ -479,6 +485,48 @@ const ACHIEVEMENTS = {
     speedRunner: { name: 'Speed Runner', desc: 'Kill 50 enemies in 30 seconds', xp: 600, icon: '⚡', check: () => achievements.speedRunner }
 };
 
+// ============================================
+// MISSION SYSTEM V1 DEFINITIONS
+// ============================================
+const MISSIONS = [
+    {
+        id: 'destroy_25_enemies',
+        name: 'Eliminate Threats',
+        desc: 'Destroy 25 enemies in combat',
+        icon: '⚔️',
+        target: 25,
+        rewardXP: 250,
+        getProgress: () => {
+            const kills = (gameStats.totalKills || 0) + (gameState === 'playing' ? enemiesDestroyed : 0);
+            return Math.min(25, kills);
+        }
+    },
+    {
+        id: 'reach_wave_5',
+        name: 'Deep Space Scout',
+        desc: 'Reach Wave 5 in Arcade or Endless',
+        icon: '🛡️',
+        target: 5,
+        rewardXP: 500,
+        getProgress: () => {
+            const maxWave = Math.max(gameStats.highestWave || 0, wave || 1);
+            return Math.min(5, maxWave);
+        }
+    },
+    {
+        id: 'collect_3_powerups',
+        name: 'Power Surge',
+        desc: 'Collect 3 power-up capsules',
+        icon: '⚡',
+        target: 3,
+        rewardXP: 300,
+        getProgress: () => {
+            const collected = gameStats.powerUpsCollected || 0;
+            return Math.min(3, collected);
+        }
+    }
+];
+
 // DAILY CHALLENGE DEFINITIONS
 const DAILY_MODIFIERS = [
     { id: 'doubleSpeed', name: 'Double Speed', desc: 'Enemies move 2x faster', modifier: (config) => { config.enemy.baseSpeed *= 2; } },
@@ -566,6 +614,14 @@ function init() {
     if (settingsBtn) settingsBtn.addEventListener('click', openSettingsScreen);
     if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', closeSettingsScreen);
 
+    // Mission screen event listeners
+    const missionsBtn = document.getElementById('missions-btn');
+    const pauseMissionsBtn = document.getElementById('pause-missions-btn');
+    const closeMissionsBtn = document.getElementById('close-missions-btn');
+    if (missionsBtn) missionsBtn.addEventListener('click', () => openMissionsScreen('start'));
+    if (pauseMissionsBtn) pauseMissionsBtn.addEventListener('click', () => openMissionsScreen('pause'));
+    if (closeMissionsBtn) closeMissionsBtn.addEventListener('click', closeMissionsScreen);
+
     // PROFILE SYSTEM: Event listeners
     const createProfileBtn = document.getElementById('create-profile-btn');
     const newProfileInput = document.getElementById('new-profile-name');
@@ -643,6 +699,7 @@ function loadProgress() {
             selectedSkin = data.selectedSkin || 'default';
             purchasedSkins = data.purchasedSkins || ['default'];
         }
+        missions = JSON.parse(localStorage.getItem('cosmicFuryMissions') || '{}');
     } catch (e) { }
 }
 
@@ -657,7 +714,10 @@ function saveProgress() {
         currentProfile.selectedSkin = selectedSkin;
         currentProfile.purchasedSkins = purchasedSkins;
         currentProfile.highScore = highScore;
+        currentProfile.missions = missions;
         saveProfiles();
+    } else {
+        localStorage.setItem('cosmicFuryMissions', JSON.stringify(missions));
     }
 }
 
@@ -688,6 +748,7 @@ function resetProgress() {
             localStorage.removeItem('cosmicFuryHighScore');
             localStorage.removeItem('cosmicFuryStats');
             localStorage.removeItem('cosmicFuryLeaderboard');
+            localStorage.removeItem('cosmicFuryMissions');
             alert('✅ All data has been reset!');
             location.reload();
         }
@@ -705,6 +766,7 @@ function resetProgress() {
             luck: 0, critical: 0, armor: 0, xpBoost: 0, pointBoost: 0
         };
         currentProfile.achievements = {};
+        currentProfile.missions = {};
         currentProfile.selectedSkin = 'default';
         currentProfile.purchasedSkins = ['default'];
 
@@ -716,6 +778,7 @@ function resetProgress() {
         points = 0;
         upgrades = { ...currentProfile.upgrades };
         achievements = {};
+        missions = {};
         selectedSkin = 'default';
         purchasedSkins = ['default'];
 
@@ -750,6 +813,7 @@ function loadProfiles() {
                 playerLevel = foundProfile.level || 1;
                 totalXP = foundProfile.totalXP || 0;
                 achievements = foundProfile.achievements || {};
+                missions = foundProfile.missions || {};
                 points = foundProfile.points || 0;
                 upgrades = {
                     fireRate: 0, damage: 0, shield: 0, speed: 0, magnet: 0,
@@ -811,6 +875,7 @@ function createProfile(name) {
         selectedSkin: 'default',
         purchasedSkins: ['default'],
         achievements: {},
+        missions: {},
         createdAt: new Date().toISOString()
     };
 
@@ -830,6 +895,7 @@ function selectProfile(profileId) {
     playerLevel = profile.level || 1;
     totalXP = profile.totalXP || 0;
     achievements = profile.achievements || {};
+    missions = profile.missions || {};
     points = profile.points || 0;
     upgrades = {
         fireRate: 0, damage: 0, shield: 0, speed: 0, magnet: 0,
@@ -1318,8 +1384,15 @@ function setupTouchControls() {
 function handleKeyDown(e) {
     keys[e.code] = true;
 
-    if (e.code === 'Escape' && (gameState === 'playing' || gameState === 'paused')) {
-        togglePause();
+    if (e.code === 'Escape') {
+        const missionsScreen = document.getElementById('missions-screen');
+        if (missionsScreen && !missionsScreen.classList.contains('hidden')) {
+            closeMissionsScreen();
+            return;
+        }
+        if (gameState === 'playing' || gameState === 'paused') {
+            togglePause();
+        }
     }
 
     // Ability keys
@@ -1397,6 +1470,8 @@ function goHome() {
     saveProgress();
 
     // Hide game screens, show menu
+    const missionsScreen = document.getElementById('missions-screen');
+    if (missionsScreen) missionsScreen.classList.add('hidden');
     document.getElementById('pause-screen').classList.add('hidden');
     document.getElementById('gameover-screen').classList.add('hidden');
     document.getElementById('start-screen').classList.remove('hidden');
@@ -1511,6 +1586,8 @@ function startGame() {
     updateHUD();
     updateAbilitiesUI();
     updateWeaponIndicator();
+    const missionsScreen = document.getElementById('missions-screen');
+    if (missionsScreen) missionsScreen.classList.add('hidden');
     document.getElementById('start-screen').classList.add('hidden');
     document.getElementById('gameover-screen').classList.add('hidden');
     document.getElementById('pause-screen').classList.add('hidden');
@@ -1523,6 +1600,7 @@ function startGame() {
     document.getElementById('abilities-bar').style.display = '';
 
     gameState = 'playing';
+    gameStartTime = performance.now();
     lastTime = performance.now();
 }
 
@@ -1554,6 +1632,9 @@ function gameOver() {
     updateStats('gamesPlayed', 1);
     updateStats('totalKills', enemiesDestroyed);
     updateStats('totalScore', score);
+    if (gameStartTime > 0) {
+        updateStats('totalPlayTime', Math.floor((performance.now() - gameStartTime) / 1000));
+    }
     if (wave > gameStats.highestWave) {
         gameStats.highestWave = wave;
     }
@@ -1562,6 +1643,7 @@ function gameOver() {
     }
     saveStats();
 
+    checkMissions();
     // sessionXP is already counted per-kill via addXP, don't double-add
     saveProgress();
 
@@ -1859,6 +1941,7 @@ function gameLoop(timestamp) {
 
     render();
     processAchievementQueue();
+    processMissionQueue();
 
     requestAnimationFrame(gameLoop);
 }
@@ -2414,6 +2497,7 @@ function addToCombo() {
 function addXP(amount) {
     const xpGain = amount * comboMultiplier;
     playerXP += xpGain;
+    totalXP += xpGain;
     sessionXP += xpGain;
 
     while (playerXP >= CONFIG.progression.xpPerLevel && playerLevel < CONFIG.progression.maxLevel) {
@@ -2572,6 +2656,7 @@ function checkAchievements() {
             saveProgress();
         }
     }
+    checkMissions();
 }
 
 function processAchievementQueue() {
@@ -2586,6 +2671,60 @@ function processAchievementQueue() {
 
     setTimeout(() => {
         document.getElementById('achievement-popup').classList.add('hidden');
+    }, 3000);
+}
+
+// ============================================
+// MISSION SYSTEM V1 LOGIC
+// ============================================
+function checkMissions() {
+    let changed = false;
+    MISSIONS.forEach(mission => {
+        const mData = missions[mission.id] || { completed: false, claimed: false };
+        if (!mData.completed && mission.getProgress() >= mission.target) {
+            mData.completed = true;
+            mData.completedAt = Date.now();
+            missions[mission.id] = mData;
+            changed = true;
+
+            // Auto-claim reward and celebrate if during gameplay
+            if (!mData.claimed) {
+                mData.claimed = true;
+                addXP(mission.rewardXP);
+                missionQueue.push(mission);
+                processMissionQueue();
+            }
+        }
+    });
+
+    if (changed) {
+        saveProgress();
+        const missionsScreen = document.getElementById('missions-screen');
+        if (missionsScreen && !missionsScreen.classList.contains('hidden')) {
+            renderMissionsList();
+        }
+    }
+}
+
+function processMissionQueue() {
+    if (missionQueue.length === 0) return;
+    const popup = document.getElementById('mission-popup');
+    if (!popup || !popup.classList.contains('hidden')) return;
+
+    const mission = missionQueue.shift();
+    const nameEl = document.getElementById('mission-popup-name');
+    const rewardEl = document.getElementById('mission-popup-reward');
+    if (nameEl) nameEl.textContent = mission.name;
+    if (rewardEl) rewardEl.textContent = `+${mission.rewardXP} XP`;
+    popup.classList.remove('hidden');
+
+    audioEngine.playAchievement();
+
+    setTimeout(() => {
+        popup.classList.add('hidden');
+        if (missionQueue.length > 0) {
+            setTimeout(processMissionQueue, 300);
+        }
     }, 3000);
 }
 
@@ -2660,6 +2799,9 @@ function updatePowerUps(timestamp) {
 
 function activatePowerUp(type, timestamp) {
     audioEngine.playPowerUp();
+    updateStats('powerUpsCollected', 1);
+    saveStats();
+    checkMissions();
 
     if (type === 'heal') {
         // Instant heal - doesn't add to active power-ups
@@ -4609,6 +4751,110 @@ function closeSettingsScreen() {
     audioEngine.playClick();
     document.getElementById('settings-screen').classList.add('hidden');
     document.getElementById('start-screen').classList.remove('hidden');
+}
+
+// ============================================
+// MISSION SYSTEM V1 UI
+// ============================================
+function openMissionsScreen(fromScreen = 'start') {
+    audioEngine.init();
+    audioEngine.playClick();
+    previousMissionsScreen = fromScreen;
+
+    if (fromScreen === 'start') {
+        document.getElementById('start-screen').classList.add('hidden');
+    } else if (fromScreen === 'pause') {
+        document.getElementById('pause-screen').classList.add('hidden');
+    }
+
+    document.getElementById('missions-screen').classList.remove('hidden');
+    checkMissions();
+    renderMissionsList();
+}
+
+function closeMissionsScreen() {
+    audioEngine.playClick();
+    document.getElementById('missions-screen').classList.add('hidden');
+
+    if (previousMissionsScreen === 'start') {
+        document.getElementById('start-screen').classList.remove('hidden');
+        updateMenuDisplay();
+    } else if (previousMissionsScreen === 'pause') {
+        document.getElementById('pause-screen').classList.remove('hidden');
+    }
+}
+
+function renderMissionsList() {
+    const list = document.getElementById('missions-list');
+    if (!list) return;
+    list.innerHTML = '';
+
+    MISSIONS.forEach(mission => {
+        const mData = missions[mission.id] || { completed: false, claimed: false };
+        const progress = mission.getProgress();
+        const percent = Math.min(100, Math.floor((progress / mission.target) * 100));
+        const isComplete = mData.completed || progress >= mission.target;
+
+        const card = document.createElement('div');
+        card.className = `mission-card ${isComplete ? 'completed' : ''}`;
+
+        let statusHtml = '';
+        if (isComplete) {
+            if (!mData.claimed) {
+                statusHtml = `<button class="mission-claim-btn" data-id="${mission.id}">CLAIM ${mission.rewardXP} XP</button>`;
+            } else {
+                statusHtml = `<span class="mission-status-badge completed">✓ COMPLETED</span>`;
+            }
+        } else {
+            statusHtml = `<span class="mission-status-badge in-progress">IN PROGRESS</span>`;
+        }
+
+        card.innerHTML = `
+            <div class="mission-header">
+                <div class="mission-title-group">
+                    <div class="mission-icon">${mission.icon}</div>
+                    <div class="mission-text-group">
+                        <span class="mission-name">${mission.name}</span>
+                        <span class="mission-desc">${mission.desc}</span>
+                    </div>
+                </div>
+                <div class="mission-meta">
+                    <span class="mission-reward">⭐ +${mission.rewardXP} XP</span>
+                    ${statusHtml}
+                </div>
+            </div>
+            <div class="mission-progress-container">
+                <div class="mission-progress-header">
+                    <span>Progress</span>
+                    <span class="mission-progress-count">${progress} / ${mission.target} (${percent}%)</span>
+                </div>
+                <div class="mission-progress-track">
+                    <div class="mission-progress-fill" style="width: ${percent}%;"></div>
+                </div>
+            </div>
+        `;
+
+        list.appendChild(card);
+    });
+
+    // Add listeners for claim buttons
+    list.querySelectorAll('.mission-claim-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            const mission = MISSIONS.find(m => m.id === id);
+            if (mission) {
+                if (!missions[id]) missions[id] = { completed: true, claimed: false };
+                missions[id].completed = true;
+                missions[id].claimed = true;
+                addXP(mission.rewardXP);
+                audioEngine.playAchievement();
+                saveProgress();
+                renderMissionsList();
+                updateMenuDisplay();
+            }
+        });
+    });
 }
 
 // Weapon indicator update
