@@ -198,6 +198,12 @@ const WEAPON_ORDER = ['laser', 'plasma', 'missile', 'railgun'];
 let drones = [];
 let lastDroneShot = 0;
 
+// TIMER TRACKING (for cleanup on restart)
+let slowmoTimeoutId = null;
+let laserIntervalId = null;
+let laserTimeoutId = null;
+let saveDebounceTimer = null;
+
 // STATISTICS SYSTEM
 let gameStats = {
     totalKills: 0,
@@ -239,6 +245,7 @@ let playerLevel = 1;
 let playerXP = 0;
 let totalXP = 0;
 let sessionXP = 0;
+let sessionPoints = 0;
 
 // Combo system
 let comboCount = 0;
@@ -1376,16 +1383,67 @@ function goHome() {
     audioEngine.stopMusic();
     gameState = 'menu';
 
-    // Save progress
-    totalXP += sessionXP;
+    // Clean up any lingering timers
+    if (slowmoTimeoutId) { clearTimeout(slowmoTimeoutId); slowmoTimeoutId = null; }
+    if (laserIntervalId) { clearInterval(laserIntervalId); laserIntervalId = null; }
+    if (laserTimeoutId) { clearTimeout(laserTimeoutId); laserTimeoutId = null; }
+    document.body.classList.remove('slowmo');
+    gameSpeed = 1;
+    slowmoActive = false;
+    laserActive = false;
+    document.querySelectorAll('.wave-announcement, .weapon-popup, .mega-laser').forEach(el => el.remove());
+
+    // Save progress (sessionXP is already counted per-kill via addXP)
     saveProgress();
 
     // Hide game screens, show menu
     document.getElementById('pause-screen').classList.add('hidden');
     document.getElementById('gameover-screen').classList.add('hidden');
     document.getElementById('start-screen').classList.remove('hidden');
+    document.getElementById('weapon-indicator').classList.add('hidden');
 
     updateMenuDisplay();
+}
+
+// ============================================
+// WAVE ANNOUNCEMENT
+// ============================================
+function showWaveAnnouncement(waveNum) {
+    const popup = document.createElement('div');
+    popup.className = 'wave-announcement';
+    
+    let waveText = `WAVE ${waveNum}`;
+    let subText = '';
+    
+    if (waveNum % 5 === 0) {
+        subText = '⚠️ BOSS INCOMING ⚠️';
+    } else if (waveNum >= 8) {
+        subText = 'NEW ENEMIES DETECTED';
+    } else if (waveNum >= 5) {
+        subText = 'DANGER INCREASING';
+    }
+    
+    popup.innerHTML = `
+        <div class="wave-announce-text">${waveText}</div>
+        ${subText ? `<div class="wave-announce-sub">${subText}</div>` : ''}
+    `;
+    popup.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(0.5);
+        color: #fff;
+        text-align: center;
+        font-family: 'Orbitron', sans-serif;
+        z-index: 999;
+        pointer-events: none;
+        animation: waveAnnounce 2s ease forwards;
+    `;
+    document.getElementById('game-container').appendChild(popup);
+    
+    audioEngine.playLevelUp();
+    
+    setTimeout(() => popup.remove(), 2500);
 }
 
 // ============================================
@@ -1395,6 +1453,15 @@ function startGame() {
     audioEngine.init();
     audioEngine.playClick();
     audioEngine.startMusic();
+
+    // --- Clean up any lingering timers from previous game ---
+    if (slowmoTimeoutId) { clearTimeout(slowmoTimeoutId); slowmoTimeoutId = null; }
+    if (laserIntervalId) { clearInterval(laserIntervalId); laserIntervalId = null; }
+    if (laserTimeoutId) { clearTimeout(laserTimeoutId); laserTimeoutId = null; }
+    document.body.classList.remove('slowmo');
+
+    // Clean up orphaned DOM elements from previous game
+    document.querySelectorAll('.wave-announcement, .weapon-popup, .mega-laser').forEach(el => el.remove());
 
     score = 0;
     wave = 1;
@@ -1411,16 +1478,23 @@ function startGame() {
     comboMultiplier = 1;
     maxCombo = 0;
     sessionXP = 0;
+    sessionPoints = 0;
+    currentWeapon = 'laser'; // Reset weapon each game
 
     currentBoss = null;
     bossActive = false;
     slowmoActive = false;
     laserActive = false;
+    ultimateActive = false;
     gameSpeed = 1;
     phoenixUsed = false; // Reset phoenix rebirth for new game
     lastRegenTime = 0;
 
-    abilityCooldowns = { bomb: 0, slowmo: 0, laser: 0 };
+    // Reset drones
+    drones = [];
+    initDrones();
+
+    abilityCooldowns = { bomb: 0, slowmo: 0, laser: 0, ultimate: 0 };
 
     player = {
         x: canvas.width / 2,
@@ -1436,10 +1510,17 @@ function startGame() {
 
     updateHUD();
     updateAbilitiesUI();
+    updateWeaponIndicator();
     document.getElementById('start-screen').classList.add('hidden');
     document.getElementById('gameover-screen').classList.add('hidden');
+    document.getElementById('pause-screen').classList.add('hidden');
     document.getElementById('combo-container').classList.add('hidden');
     document.getElementById('boss-health-container').classList.add('hidden');
+    document.getElementById('boss-warning').classList.add('hidden');
+
+    // Show HUD elements for gameplay
+    document.getElementById('hud').style.display = '';
+    document.getElementById('abilities-bar').style.display = '';
 
     gameState = 'playing';
     lastTime = performance.now();
@@ -1449,6 +1530,16 @@ function gameOver() {
     gameState = 'gameover';
     audioEngine.stopMusic();
     audioEngine.playBigExplosion();
+
+    // Clean up any lingering timers
+    if (slowmoTimeoutId) { clearTimeout(slowmoTimeoutId); slowmoTimeoutId = null; }
+    if (laserIntervalId) { clearInterval(laserIntervalId); laserIntervalId = null; }
+    if (laserTimeoutId) { clearTimeout(laserTimeoutId); laserTimeoutId = null; }
+    document.body.classList.remove('slowmo');
+    gameSpeed = 1;
+    slowmoActive = false;
+    laserActive = false;
+    document.querySelectorAll('.mega-laser').forEach(el => el.remove());
 
     const isNewHighScore = score > highScore;
     if (isNewHighScore) {
@@ -1471,7 +1562,7 @@ function gameOver() {
     }
     saveStats();
 
-    totalXP += sessionXP;
+    // sessionXP is already counted per-kill via addXP, don't double-add
     saveProgress();
 
     document.getElementById('final-score').textContent = score.toLocaleString();
@@ -1479,13 +1570,16 @@ function gameOver() {
     document.getElementById('final-enemies').textContent = enemiesDestroyed;
     document.getElementById('final-combo').textContent = maxCombo;
     document.getElementById('final-xp').textContent = sessionXP;
+    document.getElementById('final-points').textContent = sessionPoints.toLocaleString();
 
     const newHighScoreEl = document.getElementById('new-highscore');
     newHighScoreEl.classList.toggle('hidden', !isNewHighScore);
 
     document.getElementById('gameover-screen').classList.remove('hidden');
-    document.getElementById('game-container').classList.add('screen-shake');
-    setTimeout(() => document.getElementById('game-container').classList.remove('screen-shake'), 300);
+    if (gameSettings.screenShake) {
+        document.getElementById('game-container').classList.add('screen-shake');
+        setTimeout(() => document.getElementById('game-container').classList.remove('screen-shake'), 300);
+    }
 }
 
 // ============================================
@@ -1760,6 +1854,7 @@ function gameLoop(timestamp) {
 
     if (gameState === 'playing') {
         update(timestamp);
+        updateWeaponIndicator();
     }
 
     render();
@@ -1789,10 +1884,13 @@ function update(timestamp) {
         wave++;
         waveTimer = 0;
 
-        updateEnvironment(); // NEW: Change environment every 5 waves
-        updateStats('highestWave', Math.max(0, wave - gameStats.highestWave) > 0 ? 1 : 0);
+        updateEnvironment(); // Change environment every 5 waves
+        if (wave > gameStats.highestWave) gameStats.highestWave = wave;
 
-        if (wave % 5 === 0) {
+        // Wave announcement
+        showWaveAnnouncement(wave);
+
+        if (wave % CONFIG.boss.waveInterval === 0) {
             spawnBoss();
         }
 
@@ -1821,13 +1919,15 @@ function updatePlayer(timestamp) {
     player.x = Math.max(player.width / 2, Math.min(canvas.width - player.width / 2, player.x));
 
     // Fire rate: base - level bonus - upgrade bonus (8% per level) - skin bonus
-    let shootCooldown = CONFIG.player.shootCooldown * (1 - (playerLevel - 1) * 0.05 - upgrades.fireRate * 0.08);
+    const weaponConfig = CONFIG.weapons[currentWeapon] || CONFIG.weapons.laser;
+    let shootCooldown = weaponConfig.cooldown * (1 - (playerLevel - 1) * 0.05 - upgrades.fireRate * 0.08);
     if (bonuses.fireRateBonus) shootCooldown *= (1 - bonuses.fireRateBonus);
     if (bonuses.allStats) shootCooldown *= (1 - bonuses.allStats);
     if (activePowerUps.rapidFire) shootCooldown /= 3;
     shootCooldown = Math.max(40, shootCooldown); // Minimum cooldown
 
-    if (keys['Space'] && timestamp - lastShot > shootCooldown) {
+    const shouldFire = keys['Space'] || gameSettings.autoFire;
+    if (shouldFire && timestamp - lastShot > shootCooldown) {
         shoot();
         lastShot = timestamp;
     }
@@ -1862,9 +1962,10 @@ function updatePlayer(timestamp) {
 function shoot() {
     audioEngine.playShoot();
     const bonuses = getSkinBonuses();
+    const weaponConfig = CONFIG.weapons[currentWeapon] || CONFIG.weapons.laser;
 
-    // Damage: base + level bonus + upgrade bonus + skin bonus
-    let baseDamage = CONFIG.player.baseDamage + Math.floor((playerLevel - 1) * 0.15) + upgrades.damage;
+    // Damage: weapon base + level bonus + upgrade bonus + skin bonus
+    let baseDamage = weaponConfig.damage + Math.floor((playerLevel - 1) * 0.15) + upgrades.damage;
     if (bonuses.damageBonus) baseDamage = Math.floor(baseDamage * (1 + bonuses.damageBonus));
     if (bonuses.allStats) baseDamage = Math.floor(baseDamage * (1 + bonuses.allStats));
 
@@ -1876,26 +1977,40 @@ function shoot() {
     const bulletConfig = {
         x: player.x,
         y: player.y - player.height / 2,
-        width: CONFIG.bullet.width,
-        height: CONFIG.bullet.height,
-        speed: CONFIG.bullet.speed,
+        width: weaponConfig.width,
+        height: weaponConfig.height,
+        speed: weaponConfig.speed,
         damage: baseDamage,
         isCrit: isCrit,
+        color: weaponConfig.color,
+        homing: weaponConfig.homing || false,
+        piercing: weaponConfig.piercing || (bonuses.piercingBullets || false),
+        explosive: weaponConfig.explosive || false,
         // Skin special effects
         burnDamage: bonuses.burnDamage || false,
         chainAttack: bonuses.chainAttack || false,
         explosionOnKill: bonuses.explosionOnKill || false,
         freezeChance: bonuses.freezeChance || 0,
-        poisonCloud: bonuses.poisonCloud || false,
-        piercing: bonuses.piercingBullets || false
+        poisonCloud: bonuses.poisonCloud || false
     };
 
+    // Weapon spread (e.g. Plasma Spreader)
+    const projectiles = weaponConfig.projectiles || 1;
+    const spread = weaponConfig.spread || 0;
+
     if (activePowerUps.multiShot) {
-        bullets.push({ ...bulletConfig, x: player.x - 15, angle: -0.1 });
-        bullets.push({ ...bulletConfig, angle: 0 });
-        bullets.push({ ...bulletConfig, x: player.x + 15, angle: 0.1 });
+        // Multishot power-up adds extra shots
+        for (let i = -1; i <= 1; i++) {
+            for (let p = 0; p < projectiles; p++) {
+                const spreadAngle = (p - (projectiles - 1) / 2) * spread;
+                bullets.push({ ...bulletConfig, x: player.x + i * 15, angle: i * 0.1 + spreadAngle });
+            }
+        }
     } else {
-        bullets.push({ ...bulletConfig, angle: 0 });
+        for (let p = 0; p < projectiles; p++) {
+            const spreadAngle = (p - (projectiles - 1) / 2) * spread;
+            bullets.push({ ...bulletConfig, angle: spreadAngle });
+        }
     }
 
     createMuzzleFlash(player.x, player.y - player.height / 2);
@@ -1931,9 +2046,26 @@ function createTrailParticle(x, y) {
 function updateBullets() {
     for (let i = bullets.length - 1; i >= 0; i--) {
         const bullet = bullets[i];
-        bullet.y -= bullet.speed;
-        bullet.x += Math.sin(bullet.angle || 0) * bullet.speed * 0.5;
-        if (bullet.y < -bullet.height) bullets.splice(i, 1);
+
+        // Homing behavior (missiles)
+        if (bullet.homing && enemies.length > 0) {
+            const nearest = enemies.reduce((best, e) => {
+                const dist = Math.hypot(e.x - bullet.x, e.y - bullet.y);
+                return dist < best.dist ? { enemy: e, dist } : best;
+            }, { dist: Infinity }).enemy;
+            if (nearest) {
+                const targetAngle = Math.atan2(nearest.y - bullet.y, nearest.x - bullet.x) + Math.PI / 2;
+                const currentAngle = bullet.angle || 0;
+                const diff = targetAngle - currentAngle;
+                bullet.angle = currentAngle + Math.sign(diff) * Math.min(Math.abs(diff), 0.08);
+            }
+        }
+
+        bullet.y -= bullet.speed * Math.cos(bullet.angle || 0);
+        bullet.x += bullet.speed * Math.sin(bullet.angle || 0);
+        if (bullet.y < -bullet.height || bullet.y > canvas.height || bullet.x < -50 || bullet.x > canvas.width + 50) {
+            bullets.splice(i, 1);
+        }
     }
 }
 
@@ -1966,6 +2098,16 @@ function updateEnemies(timestamp) {
 
         if (enemy.type === 'zigzag') {
             enemy.x += Math.sin(enemy.y * 0.05) * 3;
+        } else if (enemy.type === 'teleporter') {
+            enemy.x += Math.sin(enemy.y * 0.02 + enemy.offset) * 0.5;
+            // Teleport randomly
+            if (Math.random() < 0.003) {
+                const oldX = enemy.x;
+                const oldY = enemy.y;
+                enemy.x = Math.random() * (canvas.width - 100) + 50;
+                createTeleportEffect(oldX, oldY, enemy.color);
+                createTeleportEffect(enemy.x, enemy.y, enemy.color);
+            }
         } else {
             enemy.x += Math.sin(enemy.y * 0.02 + enemy.offset) * 0.5;
         }
@@ -1985,11 +2127,16 @@ function spawnEnemy() {
     let typeKey = 'basic';
 
     const rand = Math.random();
-    if (wave >= 4 && rand < 0.15) typeKey = 'bomber';
-    else if (wave >= 3 && rand < 0.20) typeKey = 'sniper';
-    else if (wave >= 2 && rand < 0.25) typeKey = 'zigzag';
-    else if (wave >= 2 && rand < 0.30) typeKey = 'tank';
-    else if (wave >= 1 && rand < 0.40) typeKey = 'fast';
+    // New enemy types at higher waves
+    if (wave >= 8 && rand < 0.06) typeKey = 'splitter';
+    else if (wave >= 7 && rand < 0.10) typeKey = 'teleporter';
+    else if (wave >= 6 && rand < 0.14) typeKey = 'shielded';
+    else if (wave >= 5 && rand < 0.16) typeKey = 'elite';
+    else if (wave >= 4 && rand < 0.20) typeKey = 'bomber';
+    else if (wave >= 3 && rand < 0.25) typeKey = 'sniper';
+    else if (wave >= 2 && rand < 0.30) typeKey = 'zigzag';
+    else if (wave >= 2 && rand < 0.35) typeKey = 'tank';
+    else if (wave >= 1 && rand < 0.45) typeKey = 'fast';
 
     if (wave >= 3 && Math.random() < 0.15) {
         for (let i = 0; i < 8; i++) {
@@ -2003,15 +2150,19 @@ function spawnEnemy() {
 
 function spawnSingleEnemy(typeKey) {
     const type = CONFIG.enemy.types[typeKey];
+    if (!type) return; // Safety check
     const speedMult = type.speedMult || 1;
+    // Scale health with wave
+    const waveHealthScale = 1 + wave * CONFIG.enemy.healthScale;
+    const scaledHealth = Math.ceil(type.health * waveHealthScale);
 
     enemies.push({
         x: Math.random() * (canvas.width - type.width * 2) + type.width,
         y: -type.height,
         width: type.width,
         height: type.height,
-        health: type.health,
-        maxHealth: type.health,
+        health: scaledHealth,
+        maxHealth: scaledHealth,
         points: type.points,
         color: type.color,
         speed: (CONFIG.enemy.baseSpeed + wave * 0.35) * speedMult,
@@ -2019,7 +2170,12 @@ function spawnSingleEnemy(typeKey) {
         type: typeKey,
         xp: type.xp,
         shoots: type.shoots,
-        explodes: type.explodes
+        explodes: type.explodes,
+        splits: type.splits || false,
+        teleports: type.teleports || false,
+        shield: type.shield || 0,
+        shieldColor: type.shieldColor || null,
+        elite: type.elite || false
     });
 }
 
@@ -2049,6 +2205,8 @@ function spawnBoss() {
     audioEngine.playBossWarning();
 
     setTimeout(() => {
+        // Guard: don't spawn boss if game is no longer playing
+        if (gameState !== 'playing') return;
         document.getElementById('boss-warning').classList.add('hidden');
 
         const bossHealth = CONFIG.boss.baseHealth + (wave / 5) * CONFIG.boss.healthPerWave;
@@ -2087,22 +2245,30 @@ function spawnBoss() {
 function updateBoss(timestamp) {
     if (!currentBoss) return;
 
+    const healthRatio = currentBoss.health / currentBoss.maxHealth;
+
     if (currentBoss.y < 100) {
         currentBoss.y += currentBoss.speed;
     } else {
-        currentBoss.x += currentBoss.moveDir * 2;
-        if (currentBoss.x < 100 || currentBoss.x > canvas.width - 100) {
-            currentBoss.moveDir *= -1;
+        // Boss tracks the player more aggressively at low health
+        const trackingStrength = healthRatio < 0.3 ? 3.5 : (healthRatio < 0.6 ? 2.0 : 1.0);
+        const dx = player.x - currentBoss.x;
+        if (Math.abs(dx) > 5) {
+            currentBoss.x += Math.sign(dx) * trackingStrength;
         }
+        // Also bounce at walls
+        currentBoss.x = Math.max(80, Math.min(canvas.width - 80, currentBoss.x));
 
+        // Boss attacks faster in rage mode (below 30% HP)
+        const attackInterval = healthRatio < 0.3 ? 500 : (healthRatio < 0.6 ? 700 : 900);
         currentBoss.attackTimer += deltaTime;
-        if (currentBoss.attackTimer > 900) {
+        if (currentBoss.attackTimer > attackInterval) {
             bossAttack();
             currentBoss.attackTimer = 0;
         }
     }
 
-    const healthPercent = (currentBoss.health / currentBoss.maxHealth) * 100;
+    const healthPercent = healthRatio * 100;
     document.getElementById('boss-health-fill').style.width = `${healthPercent}%`;
 }
 
@@ -2162,10 +2328,11 @@ function bossAttack() {
 }
 
 function defeatBoss() {
-    // Epic explosion effect
+    // Epic explosion effect - staggered for dramatic effect
     createExplosion(currentBoss.x, currentBoss.y, currentBoss.color, 50);
-    createExplosion(currentBoss.x - 40, currentBoss.y - 20, '#ffffff', 20);
-    createExplosion(currentBoss.x + 40, currentBoss.y + 20, '#ffffff', 20);
+    setTimeout(() => createExplosion(currentBoss.x - 40, currentBoss.y - 20, '#ffffff', 25), 100);
+    setTimeout(() => createExplosion(currentBoss.x + 40, currentBoss.y + 20, '#ffffff', 25), 200);
+    setTimeout(() => createExplosion(currentBoss.x, currentBoss.y + 30, '#ffaa00', 30), 300);
     audioEngine.playBigExplosion();
 
     // Rewards
@@ -2173,9 +2340,20 @@ function defeatBoss() {
     addXP(currentBoss.xp);
     addPoints(500 * (wave / 5)); // Bonus points for boss kill!
 
+    // Track boss defeats in stats
+    updateStats('bossesDefeated', 1);
+
     // Heal player 30% on boss defeat
     const healAmount = getMaxHealth() * 0.3;
     player.health = Math.min(getMaxHealth(), player.health + healAmount);
+
+    // Show boss defeated text
+    particles.push({
+        x: currentBoss.x, y: currentBoss.y - 50,
+        vx: 0, vy: -1.5,
+        size: 22, color: '#ffcc00',
+        life: 2, maxLife: 2, type: 'text', text: '💀 BOSS DEFEATED!'
+    });
 
     // Spawn power-ups as rewards
     for (let i = 0; i < 3; i++) {
@@ -2249,7 +2427,13 @@ function addXP(amount) {
 
 function addPoints(amount) {
     points += amount;
-    saveProgress();
+    sessionPoints += amount;
+    // Debounce save to avoid excessive localStorage writes
+    if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+    saveDebounceTimer = setTimeout(() => {
+        saveProgress();
+        saveDebounceTimer = null;
+    }, 1000);
 }
 
 function levelUp() {
@@ -2298,10 +2482,11 @@ function useAbility(type) {
         slowmoActive = true;
         gameSpeed = 0.5;
         document.body.classList.add('slowmo');
-        setTimeout(() => {
+        slowmoTimeoutId = setTimeout(() => {
             slowmoActive = false;
             gameSpeed = 1;
             document.body.classList.remove('slowmo');
+            slowmoTimeoutId = null;
         }, config.duration);
     } else if (type === 'laser') {
         laserActive = true;
@@ -2310,9 +2495,10 @@ function useAbility(type) {
         laserEl.style.left = `${player.x}px`;
         document.getElementById('game-container').appendChild(laserEl);
 
-        const laserInterval = setInterval(() => {
-            if (!laserActive) {
-                clearInterval(laserInterval);
+        laserIntervalId = setInterval(() => {
+            if (!laserActive || gameState !== 'playing') {
+                clearInterval(laserIntervalId);
+                laserIntervalId = null;
                 return;
             }
             laserEl.style.left = `${player.x}px`;
@@ -2332,9 +2518,11 @@ function useAbility(type) {
             });
         }, 50);
 
-        setTimeout(() => {
+        laserTimeoutId = setTimeout(() => {
             laserActive = false;
             laserEl.remove();
+            if (laserIntervalId) { clearInterval(laserIntervalId); laserIntervalId = null; }
+            laserTimeoutId = null;
         }, config.duration);
     }
 
@@ -2529,7 +2717,9 @@ function updateParticles() {
             p.size += 3; // Expand ripple
         }
 
-        if (p.life <= 0) particles.splice(i, 1);
+        if (p.life <= 0 || p.x < -100 || p.x > canvas.width + 100 || p.y < -100 || p.y > canvas.height + 100) {
+            particles.splice(i, 1);
+        }
     }
 }
 
@@ -2643,12 +2833,68 @@ function checkCollisions() {
             const enemy = enemies[j];
 
             if (checkOverlap(bullet, enemy)) {
+                // Shielded enemies absorb hits with their shield first
+                if (enemy.shield && enemy.shield > 0) {
+                    enemy.shield -= bullet.damage || 1;
+                    if (!bullet.piercing) bullets.splice(i, 1);
+                    // Shield hit effect
+                    createImpactRipple(bullet.x, bullet.y, enemy.shieldColor || '#00ccff');
+                    if (enemy.shield <= 0) {
+                        enemy.shield = 0;
+                        // Shield break effect
+                        for (let k = 0; k < 8; k++) {
+                            particles.push({
+                                x: enemy.x, y: enemy.y,
+                                vx: (Math.random() - 0.5) * 6,
+                                vy: (Math.random() - 0.5) * 6,
+                                size: Math.random() * 5 + 3,
+                                color: '#00ccff',
+                                life: 0.5, maxLife: 0.5, type: 'explosion'
+                            });
+                        }
+                        particles.push({
+                            x: enemy.x, y: enemy.y - 20,
+                            vx: 0, vy: -1.5,
+                            size: 12, color: '#00ccff',
+                            life: 0.8, maxLife: 0.8, type: 'text', text: 'SHIELD BREAK!'
+                        });
+                    }
+                    if (!bullet.piercing) break;
+                    continue;
+                }
+
                 // Don't remove bullet if piercing
                 if (!bullet.piercing) {
                     bullets.splice(i, 1);
                 }
 
+                // Explosive bullets do AoE
+                if (bullet.explosive) {
+                    createExplosion(bullet.x, bullet.y, bullet.color || '#ff6600', 12);
+                    enemies.forEach(e => {
+                        if (e !== enemy && Math.hypot(e.x - bullet.x, e.y - bullet.y) < 60) {
+                            e.health -= Math.ceil(bullet.damage * 0.4);
+                        }
+                    });
+                }
+
                 enemy.health -= bullet.damage || 1;
+
+                // Floating damage numbers
+                if (gameSettings.showDamageNumbers) {
+                    const dmg = bullet.damage || 1;
+                    particles.push({
+                        x: enemy.x + (Math.random() - 0.5) * 20,
+                        y: enemy.y - enemy.height / 2 - 5,
+                        vx: (Math.random() - 0.5) * 1.5,
+                        vy: -2 - Math.random(),
+                        size: bullet.isCrit ? 16 : 11,
+                        color: bullet.isCrit ? '#ffff00' : '#ffffff',
+                        life: 0.6, maxLife: 0.6,
+                        type: 'text',
+                        text: bullet.isCrit ? `${dmg}!` : `${dmg}`
+                    });
+                }
 
                 // Freeze effect (slow enemy)
                 if (bullet.freezeChance && Math.random() < bullet.freezeChance) {
@@ -2667,8 +2913,8 @@ function checkCollisions() {
                     }
                 }
 
-                // Critical hit visual
-                if (bullet.isCrit) {
+                // Critical hit visual (only if damage numbers are off, otherwise it's shown in the number)
+                if (bullet.isCrit && !gameSettings.showDamageNumbers) {
                     particles.push({
                         x: enemy.x, y: enemy.y - 20,
                         vx: 0, vy: -1,
@@ -2682,6 +2928,11 @@ function checkCollisions() {
                 if (enemy.health <= 0) {
                     createExplosion(enemy.x, enemy.y, enemy.color);
                     audioEngine.playExplosion();
+
+                    // Handle splitter death - spawn mini enemies
+                    if (enemy.splits) {
+                        handleSplitterDeath(enemy);
+                    }
 
                     // Explosion on kill (Solar Flare skin)
                     if (bullet.explosionOnKill) {
@@ -2763,7 +3014,8 @@ function checkCollisions() {
 
                     const earnedScore = Math.floor(enemy.points * comboMultiplier * pointMult);
                     score += earnedScore;
-                    addPoints(Math.floor(earnedScore * 0.1)); // 10% of score as points
+                    const earnedPoints = Math.floor(earnedScore * 0.1);
+                    addPoints(earnedPoints); // 10% of score as points
                     addXP(Math.floor(enemy.xp * xpMult));
                     addToCombo();
                     enemiesDestroyed++;
@@ -2781,8 +3033,32 @@ function checkCollisions() {
 
     // Enemy bullets vs Player
     if (!player.invincible && !activePowerUps.shield) {
+        const bonuses = getSkinBonuses();
         for (let i = enemyBullets.length - 1; i >= 0; i--) {
             if (checkOverlap(player, enemyBullets[i])) {
+                // Diamond skin: chance to reflect bullet
+                if (bonuses.reflectChance && Math.random() < bonuses.reflectChance) {
+                    const b = enemyBullets[i];
+                    // Reflect: turn into a player bullet aimed upward
+                    bullets.push({
+                        x: b.x, y: b.y,
+                        width: b.width, height: b.height,
+                        speed: 10, damage: 2,
+                        color: '#b2ebf2', angle: 0,
+                        piercing: false, homing: false, explosive: false
+                    });
+                    enemyBullets.splice(i, 1);
+                    // Reflect particle effect
+                    particles.push({
+                        x: b.x, y: b.y,
+                        vx: 0, vy: -2,
+                        size: 14, color: '#b2ebf2',
+                        life: 0.6, maxLife: 0.6, type: 'text', text: 'REFLECT!'
+                    });
+                    createImpactRipple(b.x, b.y, '#b2ebf2');
+                    audioEngine.playClick();
+                    continue;
+                }
                 enemyBullets.splice(i, 1);
                 damagePlayer(15);
             }
@@ -2832,8 +3108,10 @@ function damagePlayer(amount) {
 
     audioEngine.playHit();
 
-    document.getElementById('game-container').classList.add('screen-shake');
-    setTimeout(() => document.getElementById('game-container').classList.remove('screen-shake'), 300);
+    if (gameSettings.screenShake) {
+        document.getElementById('game-container').classList.add('screen-shake');
+        setTimeout(() => document.getElementById('game-container').classList.remove('screen-shake'), 300);
+    }
 
     updateHUD();
 
@@ -3060,6 +3338,9 @@ function renderPlayer() {
 
 // Helper function to convert hex to RGB
 function hexToRgb(hex) {
+    if (typeof hex !== 'string' || !hex.startsWith('#')) {
+        return '255, 255, 255'; // Safe fallback for HSL, rgb, etc.
+    }
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
     if (result) {
         return `${parseInt(result[1], 16)}, ${parseInt(result[2], 16)}, ${parseInt(result[3], 16)}`;
@@ -3246,6 +3527,38 @@ function renderEnemies() {
             ctx.lineTo(0, enemy.height / 2);
             ctx.lineTo(-enemy.width / 2, 0);
             ctx.closePath();
+        } else if (enemy.type === 'shielded') {
+            // Pentagon shape
+            ctx.beginPath();
+            for (let i = 0; i < 5; i++) {
+                const angle = (Math.PI * 2 / 5) * i - Math.PI / 2;
+                const x = Math.cos(angle) * enemy.width / 2;
+                const y = Math.sin(angle) * enemy.height / 2;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+        } else if (enemy.type === 'teleporter') {
+            // Star shape
+            ctx.beginPath();
+            for (let i = 0; i < 8; i++) {
+                const angle = (Math.PI * 2 / 8) * i - Math.PI / 2;
+                const r = i % 2 === 0 ? enemy.width / 2 : enemy.width / 4;
+                const x = Math.cos(angle) * r;
+                const y = Math.sin(angle) * r;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+        } else if (enemy.type === 'splitter') {
+            // Double triangle
+            ctx.beginPath();
+            ctx.moveTo(0, -enemy.height / 2);
+            ctx.lineTo(enemy.width / 2, enemy.height / 4);
+            ctx.lineTo(0, 0);
+            ctx.lineTo(-enemy.width / 2, enemy.height / 4);
+            ctx.closePath();
+            ctx.moveTo(0, enemy.height / 2);
         } else if (enemy.type === 'swarm') {
             ctx.beginPath();
             ctx.arc(0, 0, enemy.width / 2, 0, Math.PI * 2);
@@ -3313,8 +3626,22 @@ function renderEnemies() {
             }
         }
 
+        // Shield visual for shielded enemies
+        if (enemy.shield && enemy.shield > 0) {
+            ctx.beginPath();
+            ctx.arc(0, 0, enemy.width * 0.7, 0, Math.PI * 2);
+            ctx.strokeStyle = enemy.shieldColor || '#00ccff';
+            ctx.lineWidth = 2;
+            ctx.shadowColor = enemy.shieldColor || '#00ccff';
+            ctx.shadowBlur = 12;
+            ctx.globalAlpha = 0.5 + Math.sin(time * 8) * 0.2;
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur = 0;
+        }
+
         // Health bar for heavy enemies
-        if ((enemy.type === 'tank' || enemy.type === 'bomber' || enemy.type === 'elite') && enemy.health < enemy.maxHealth) {
+        if ((enemy.type === 'tank' || enemy.type === 'bomber' || enemy.type === 'elite' || enemy.type === 'shielded' || enemy.type === 'splitter') && enemy.health < enemy.maxHealth) {
             const barWidth = enemy.width * 0.8;
             const barHeight = 5;
             const barY = -enemy.height / 2 - 12;
@@ -3747,7 +4074,12 @@ function updateHUD() {
 // UTILITY FUNCTIONS
 // ============================================
 function shadeColor(color, percent) {
+    // Safety: only process valid hex color strings
+    if (typeof color !== 'string' || !color.startsWith('#') || color.length < 7) {
+        return color; // Return as-is for HSL, rgba, or other formats
+    }
     const num = parseInt(color.replace('#', ''), 16);
+    if (isNaN(num)) return color;
     const amt = Math.round(2.55 * percent);
     const R = (num >> 16) + amt;
     const G = (num >> 8 & 0x00FF) + amt;
@@ -4127,6 +4459,9 @@ function useUltimateAbility() {
     const meteorCount = 15;
     for (let i = 0; i < meteorCount; i++) {
         setTimeout(() => {
+            // Guard: don't continue if game is no longer playing
+            if (gameState !== 'playing') return;
+
             const x = Math.random() * canvas.width;
             const y = Math.random() * (canvas.height * 0.7);
 

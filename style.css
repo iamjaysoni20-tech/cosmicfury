@@ -2953,3 +2953,59 @@ body.slowmo .stars-layer {
         height: 40px;
     }
 }
+
+/* ========================================
+   WAVE ANNOUNCEMENT POPUP
+   ======================================== */
+.wave-announcement {
+    text-shadow: 0 0 30px rgba(0, 245, 255, 0.8), 0 0 60px rgba(0, 245, 255, 0.4);
+}
+
+.wave-announce-text {
+    font-size: 3rem;
+    font-weight: 900;
+    letter-spacing: 0.3em;
+    background: linear-gradient(180deg, #fff 20%, var(--primary) 80%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.wave-announce-sub {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    color: var(--accent);
+    margin-top: 8px;
+    text-shadow: 0 0 15px rgba(255, 204, 0, 0.6);
+}
+
+@keyframes waveAnnounce {
+    0% {
+        transform: translate(-50%, -50%) scale(0.3);
+        opacity: 0;
+    }
+    15% {
+        transform: translate(-50%, -50%) scale(1.15);
+        opacity: 1;
+    }
+    25% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 1;
+    }
+    75% {
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 1;
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(1.5);
+        opacity: 0;
+    }
+}
+
+@keyframes fadeInOut {
+    0% { opacity: 0; transform: translateX(-50%) translateY(10px); }
+    20% { opacity: 1; transform: translateX(-50%) translateY(0); }
+    80% { opacity: 1; transform: translateX(-50%) translateY(0); }
+    100% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+}
