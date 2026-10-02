@@ -7,7 +7,15 @@
 // MOBILE DETECTION & OPTIMIZATION
 // ============================================
 const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
-    window.innerWidth < 800 || 'ontouchstart' in window;
+    (window.innerWidth < 800 && ('ontouchstart' in window || navigator.maxTouchPoints > 0));
+
+let timeScale = 1;
+
+function getGlowBlur(blur) {
+    if (isMobile || gameSettings.particles === 'low') return 0;
+    if (gameSettings.particles === 'medium') return Math.min(blur, 6);
+    return blur;
+}
 
 // ============================================
 // GAME CONFIGURATION
@@ -1306,78 +1314,50 @@ function setupTouchControls() {
 
     if (!touchLeft || !touchRight || !touchFire) return;
 
-    // Helper to simulate key press
-    function setKey(keyCode, pressed) {
-        keys[keyCode] = pressed;
+    function bindTouchButton(btn, keyCode) {
+        if (!btn) return;
+        const press = (e) => {
+            if (e && e.cancelable) e.preventDefault();
+            keys[keyCode] = true;
+            btn.classList.add('active');
+        };
+        const release = (e) => {
+            if (e && e.cancelable) e.preventDefault();
+            keys[keyCode] = false;
+            btn.classList.remove('active');
+        };
+
+        btn.addEventListener('touchstart', press, { passive: false });
+        btn.addEventListener('touchend', release, { passive: false });
+        btn.addEventListener('touchcancel', release, { passive: false });
+        btn.addEventListener('pointerdown', press);
+        btn.addEventListener('pointerup', release);
+        btn.addEventListener('pointercancel', release);
+        btn.addEventListener('pointerleave', release);
     }
 
-    // Left button
-    touchLeft.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        setKey('ArrowLeft', true);
-        touchLeft.classList.add('active');
-    });
-    touchLeft.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        setKey('ArrowLeft', false);
-        touchLeft.classList.remove('active');
-    });
-    touchLeft.addEventListener('touchcancel', () => {
-        setKey('ArrowLeft', false);
-        touchLeft.classList.remove('active');
-    });
+    bindTouchButton(touchLeft, 'ArrowLeft');
+    bindTouchButton(touchRight, 'ArrowRight');
+    bindTouchButton(touchFire, 'Space');
 
-    // Right button
-    touchRight.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        setKey('ArrowRight', true);
-        touchRight.classList.add('active');
-    });
-    touchRight.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        setKey('ArrowRight', false);
-        touchRight.classList.remove('active');
-    });
-    touchRight.addEventListener('touchcancel', () => {
-        setKey('ArrowRight', false);
-        touchRight.classList.remove('active');
-    });
-
-    // Fire button (hold to fire continuously)
-    touchFire.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        setKey('Space', true);
-        touchFire.classList.add('active');
-    });
-    touchFire.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        setKey('Space', false);
-        touchFire.classList.remove('active');
-    });
-    touchFire.addEventListener('touchcancel', () => {
-        setKey('Space', false);
-        touchFire.classList.remove('active');
-    });
-
-    // Show/hide mobile controls based on game state
-    function updateMobileControlsVisibility() {
+    // Efficient state-driven visibility check instead of continuous polling
+    window.updateMobileControlsVisibility = function () {
         if (mobileControls) {
-            if (gameState === 'playing') {
-                mobileControls.style.display = '';
+            if (gameState === 'playing' && (isMobile || window.innerWidth < 800)) {
+                mobileControls.style.display = 'flex';
             } else {
                 mobileControls.style.display = 'none';
             }
         }
-    }
+    };
 
-    // Check periodically for game state changes
-    setInterval(updateMobileControlsVisibility, 100);
+    window.updateMobileControlsVisibility();
 
     // Prevent default touch behavior on game canvas to avoid scrolling
-    const canvas = document.getElementById('gameCanvas');
-    if (canvas) {
-        canvas.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
-        canvas.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+    const canvasEl = document.getElementById('gameCanvas');
+    if (canvasEl) {
+        canvasEl.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+        canvasEl.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
     }
 }
 
@@ -1427,6 +1407,7 @@ function togglePause() {
         lastTime = performance.now();
         audioEngine.startMusic();
     }
+    if (window.updateMobileControlsVisibility) window.updateMobileControlsVisibility();
 }
 
 function toggleAudio() {
@@ -1443,6 +1424,7 @@ function resumeGame() {
     document.getElementById('pause-screen').classList.add('hidden');
     lastTime = performance.now();
     audioEngine.startMusic();
+    if (window.updateMobileControlsVisibility) window.updateMobileControlsVisibility();
 }
 
 function restartFromPause() {
@@ -1477,6 +1459,7 @@ function goHome() {
     document.getElementById('start-screen').classList.remove('hidden');
     document.getElementById('weapon-indicator').classList.add('hidden');
 
+    if (window.updateMobileControlsVisibility) window.updateMobileControlsVisibility();
     updateMenuDisplay();
 }
 
@@ -1602,12 +1585,14 @@ function startGame() {
     gameState = 'playing';
     gameStartTime = performance.now();
     lastTime = performance.now();
+    if (window.updateMobileControlsVisibility) window.updateMobileControlsVisibility();
 }
 
 function gameOver() {
     gameState = 'gameover';
     audioEngine.stopMusic();
     audioEngine.playBigExplosion();
+    if (window.updateMobileControlsVisibility) window.updateMobileControlsVisibility();
 
     // Clean up any lingering timers
     if (slowmoTimeoutId) { clearTimeout(slowmoTimeoutId); slowmoTimeoutId = null; }
@@ -1674,8 +1659,9 @@ let distantPlanets = [];
 
 function initStarfield() {
     stars = [];
-    // More stars with color variation
-    for (let i = 0; i < 200; i++) {
+    // Lightweight star count on mobile for performance
+    const starCount = isMobile ? 80 : 180;
+    for (let i = 0; i < starCount; i++) {
         const colorType = Math.random();
         let color;
         if (colorType < 0.7) color = { r: 255, g: 255, b: 255 }; // White
@@ -1702,7 +1688,7 @@ function initStarfield() {
 
 function initNebulaClouds() {
     nebulaClouds = [];
-    const cloudCount = 6;
+    const cloudCount = isMobile ? 2 : 5;
     const colors = [
         { r: 100, g: 50, b: 150 },  // Purple
         { r: 50, g: 100, b: 150 },  // Blue
@@ -1743,19 +1729,19 @@ function initDistantPlanets() {
 }
 
 function updateStarfield() {
-    // Update stars
+    // Update stars with timeScale
     stars.forEach(star => {
-        star.y += star.speed * gameSpeed * 0.5;
+        star.y += star.speed * gameSpeed * 0.5 * timeScale;
         if (star.y > canvas.height) {
             star.y = -5;
             star.x = Math.random() * canvas.width;
         }
     });
 
-    // Update nebula clouds
+    // Update nebula clouds with timeScale
     nebulaClouds.forEach(cloud => {
-        cloud.y += cloud.speed * gameSpeed;
-        cloud.x += cloud.driftX * gameSpeed;
+        cloud.y += cloud.speed * gameSpeed * timeScale;
+        cloud.x += cloud.driftX * gameSpeed * timeScale;
         if (cloud.y > canvas.height + cloud.size) {
             cloud.y = -cloud.size;
             cloud.x = Math.random() * canvas.width;
@@ -1764,21 +1750,21 @@ function updateStarfield() {
         if (cloud.x > canvas.width + cloud.size) cloud.x = -cloud.size;
     });
 
-    // Update distant planets
+    // Update distant planets with timeScale
     distantPlanets.forEach(planet => {
-        planet.y += planet.speed * gameSpeed * 0.3;
+        planet.y += planet.speed * gameSpeed * 0.3 * timeScale;
         if (planet.y > canvas.height + planet.size) {
             planet.y = -planet.size * 2;
             planet.x = Math.random() * canvas.width;
         }
     });
 
-    // Update shooting stars
+    // Update shooting stars with timeScale
     for (let i = shootingStars.length - 1; i >= 0; i--) {
         const ss = shootingStars[i];
-        ss.x += ss.vx;
-        ss.y += ss.vy;
-        ss.life -= 0.02;
+        ss.x += ss.vx * timeScale;
+        ss.y += ss.vy * timeScale;
+        ss.life -= (deltaTime / 1000) * 1.2;
         if (ss.life <= 0 || ss.y > canvas.height || ss.x < 0 || ss.x > canvas.width) {
             shootingStars.splice(i, 1);
         }
@@ -1804,6 +1790,9 @@ function spawnShootingStar() {
 }
 
 function renderNebulaClouds() {
+    // Skip heavy radial gradients on mobile/low settings to preserve battery and maintain 60 FPS
+    if (isMobile || gameSettings.particles === 'low') return;
+
     const time = Date.now() * 0.001;
 
     nebulaClouds.forEach(cloud => {
@@ -1882,7 +1871,7 @@ function renderShootingStars() {
         ctx.arc(ss.x, ss.y, 3, 0, Math.PI * 2);
         ctx.fillStyle = '#ffffff';
         ctx.shadowColor = '#88ccff';
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = getGlowBlur(10);
         ctx.fill();
 
         ctx.restore();
@@ -1905,8 +1894,8 @@ function renderStarfield() {
         ctx.fillStyle = `rgba(${star.color.r}, ${star.color.g}, ${star.color.b}, ${star.brightness * twinkle})`;
         ctx.fill();
 
-        // Add subtle glow to larger stars
-        if (star.size > 1.5) {
+        // Add subtle glow to larger stars on desktop only
+        if (!isMobile && star.size > 1.5) {
             ctx.beginPath();
             ctx.arc(star.x, star.y, star.size * 2, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(${star.color.r}, ${star.color.g}, ${star.color.b}, ${star.brightness * twinkle * 0.2})`;
@@ -1922,8 +1911,17 @@ function renderStarfield() {
 // GAME LOOP
 // ============================================
 function gameLoop(timestamp) {
-    deltaTime = (timestamp - lastTime) * gameSpeed;
+    if (!lastTime) lastTime = timestamp;
+    let rawDelta = timestamp - lastTime;
     lastTime = timestamp;
+
+    // Safe delta-time cap: clamp between 0 and 64ms (avoids tunneling or jumping if frame drops/tab switch)
+    if (rawDelta > 64) rawDelta = 64;
+    if (rawDelta < 0) rawDelta = 0;
+
+    deltaTime = rawDelta * gameSpeed;
+    // Normalized time delta factor (1.0 = standard 60 FPS, i.e., 16.667ms)
+    timeScale = (rawDelta / 16.667) * gameSpeed;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -1996,8 +1994,9 @@ function updatePlayer(timestamp) {
     if (bonuses.speedPenalty) speed *= (1 + bonuses.speedPenalty); // Negative value reduces speed
     if (bonuses.allStats) speed *= (1 + bonuses.allStats);
 
-    if (keys['ArrowLeft'] || keys['KeyA']) player.x -= speed;
-    if (keys['ArrowRight'] || keys['KeyD']) player.x += speed;
+    const moveStep = speed * timeScale;
+    if (keys['ArrowLeft'] || keys['KeyA']) player.x -= moveStep;
+    if (keys['ArrowRight'] || keys['KeyD']) player.x += moveStep;
 
     player.x = Math.max(player.width / 2, Math.min(canvas.width - player.width / 2, player.x));
 
@@ -2140,12 +2139,12 @@ function updateBullets() {
                 const targetAngle = Math.atan2(nearest.y - bullet.y, nearest.x - bullet.x) + Math.PI / 2;
                 const currentAngle = bullet.angle || 0;
                 const diff = targetAngle - currentAngle;
-                bullet.angle = currentAngle + Math.sign(diff) * Math.min(Math.abs(diff), 0.08);
+                bullet.angle = currentAngle + Math.sign(diff) * Math.min(Math.abs(diff), 0.08 * timeScale);
             }
         }
 
-        bullet.y -= bullet.speed * Math.cos(bullet.angle || 0);
-        bullet.x += bullet.speed * Math.sin(bullet.angle || 0);
+        bullet.y -= bullet.speed * Math.cos(bullet.angle || 0) * timeScale;
+        bullet.x += bullet.speed * Math.sin(bullet.angle || 0) * timeScale;
         if (bullet.y < -bullet.height || bullet.y > canvas.height || bullet.x < -50 || bullet.x > canvas.width + 50) {
             bullets.splice(i, 1);
         }
@@ -2155,8 +2154,8 @@ function updateBullets() {
 function updateEnemyBullets() {
     for (let i = enemyBullets.length - 1; i >= 0; i--) {
         const b = enemyBullets[i];
-        b.x += b.vx;
-        b.y += b.vy;
+        b.x += b.vx * timeScale;
+        b.y += b.vy * timeScale;
         if (b.y > canvas.height || b.x < 0 || b.x > canvas.width) {
             enemyBullets.splice(i, 1);
         }
@@ -2177,12 +2176,12 @@ function updateEnemies(timestamp) {
 
     for (let i = enemies.length - 1; i >= 0; i--) {
         const enemy = enemies[i];
-        enemy.y += enemy.speed * gameSpeed;
+        enemy.y += enemy.speed * gameSpeed * timeScale;
 
         if (enemy.type === 'zigzag') {
-            enemy.x += Math.sin(enemy.y * 0.05) * 3;
+            enemy.x += Math.sin(enemy.y * 0.05) * 3 * timeScale;
         } else if (enemy.type === 'teleporter') {
-            enemy.x += Math.sin(enemy.y * 0.02 + enemy.offset) * 0.5;
+            enemy.x += Math.sin(enemy.y * 0.02 + enemy.offset) * 0.5 * timeScale;
             // Teleport randomly
             if (Math.random() < 0.003) {
                 const oldX = enemy.x;
@@ -2192,7 +2191,7 @@ function updateEnemies(timestamp) {
                 createTeleportEffect(enemy.x, enemy.y, enemy.color);
             }
         } else {
-            enemy.x += Math.sin(enemy.y * 0.02 + enemy.offset) * 0.5;
+            enemy.x += Math.sin(enemy.y * 0.02 + enemy.offset) * 0.5 * timeScale;
         }
 
         if (enemy.shoots && Math.random() < 0.005) {
@@ -2331,13 +2330,13 @@ function updateBoss(timestamp) {
     const healthRatio = currentBoss.health / currentBoss.maxHealth;
 
     if (currentBoss.y < 100) {
-        currentBoss.y += currentBoss.speed;
+        currentBoss.y += currentBoss.speed * timeScale;
     } else {
         // Boss tracks the player more aggressively at low health
         const trackingStrength = healthRatio < 0.3 ? 3.5 : (healthRatio < 0.6 ? 2.0 : 1.0);
         const dx = player.x - currentBoss.x;
         if (Math.abs(dx) > 5) {
-            currentBoss.x += Math.sign(dx) * trackingStrength;
+            currentBoss.x += Math.sign(dx) * Math.min(Math.abs(dx), trackingStrength * timeScale);
         }
         // Also bounce at walls
         currentBoss.x = Math.max(80, Math.min(canvas.width - 80, currentBoss.x));
@@ -2749,8 +2748,8 @@ function spawnPowerUp(x, y) {
 function updatePowerUps(timestamp) {
     for (let i = powerUps.length - 1; i >= 0; i--) {
         const pu = powerUps[i];
-        pu.y += pu.speed;
-        pu.angle += 0.05;
+        pu.y += pu.speed * timeScale;
+        pu.angle += 0.05 * timeScale;
 
         // Magnet upgrade: attract power-ups toward player
         const bonuses = getSkinBonuses();
@@ -2763,8 +2762,8 @@ function updatePowerUps(timestamp) {
             const dist = Math.sqrt(dx * dx + dy * dy);
             if (dist < magnetRange && dist > 0) {
                 const magnetStrength = (1 - dist / magnetRange) * (0.5 + upgrades.magnet * 0.2 + skinMagnetBonus);
-                pu.x += (dx / dist) * magnetStrength * 5;
-                pu.y += (dy / dist) * magnetStrength * 5;
+                pu.x += (dx / dist) * magnetStrength * 5 * timeScale;
+                pu.y += (dy / dist) * magnetStrength * 5 * timeScale;
             }
         }
 
@@ -2839,24 +2838,30 @@ function activatePowerUp(type, timestamp) {
 // PARTICLES
 // ============================================
 function updateParticles() {
+    const isPerformanceMode = isMobile || gameSettings.particles === 'low';
+    const maxParticles = isPerformanceMode ? 50 : (gameSettings.particles === 'medium' ? 100 : 180);
+    if (particles.length > maxParticles) {
+        particles.splice(0, particles.length - maxParticles);
+    }
+
     for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
-        p.x += p.vx;
-        p.y += p.vy;
+        p.x += p.vx * timeScale;
+        p.y += p.vy * timeScale;
         p.life -= deltaTime / 1000;
 
         // Different physics per particle type
         if (p.type === 'explosion') {
-            p.vy += 0.15;
-            p.vx *= 0.98;
+            p.vy += 0.15 * timeScale;
+            p.vx *= Math.pow(0.98, timeScale);
         } else if (p.type === 'ember') {
-            p.vy -= 0.05; // Float upward
-            p.vx += (Math.random() - 0.5) * 0.2;
+            p.vy -= 0.05 * timeScale; // Float upward
+            p.vx += (Math.random() - 0.5) * 0.2 * timeScale;
         } else if (p.type === 'smoke') {
-            p.vy -= 0.3;
-            p.size += 0.5;
+            p.vy -= 0.3 * timeScale;
+            p.size += 0.5 * timeScale;
         } else if (p.type === 'ripple') {
-            p.size += 3; // Expand ripple
+            p.size += 3 * timeScale; // Expand ripple
         }
 
         if (p.life <= 0 || p.x < -100 || p.x > canvas.width + 100 || p.y < -100 || p.y > canvas.height + 100) {
@@ -2866,15 +2871,27 @@ function updateParticles() {
 }
 
 function createExplosion(x, y, color, count = CONFIG.particles.explosionCount) {
+    const isPerformanceMode = isMobile || gameSettings.particles === 'low';
+    const maxParticles = isPerformanceMode ? 50 : (gameSettings.particles === 'medium' ? 100 : 180);
+
+    const actualCount = isPerformanceMode ? Math.min(count, 5) : count;
+    const sparkCount = isPerformanceMode ? 3 : 8;
+    const emberCount = isPerformanceMode ? 2 : 5;
+    const smokeCount = isPerformanceMode ? 1 : 3;
+
+    if (particles.length > maxParticles) {
+        particles.splice(0, particles.length - maxParticles + actualCount);
+    }
+
     // Main explosion particles
-    for (let i = 0; i < count; i++) {
-        const angle = (Math.PI * 2 / count) * i + Math.random() * 0.5;
+    for (let i = 0; i < actualCount; i++) {
+        const angle = (Math.PI * 2 / actualCount) * i + Math.random() * 0.5;
         const speed = Math.random() * 6 + 3;
         particles.push({
             x, y,
             vx: Math.cos(angle) * speed,
             vy: Math.sin(angle) * speed,
-            size: Math.random() * 10 + 5,
+            size: Math.random() * 8 + 4,
             color,
             life: Math.random() * 0.6 + 0.4,
             maxLife: 1, type: 'explosion'
@@ -2882,8 +2899,8 @@ function createExplosion(x, y, color, count = CONFIG.particles.explosionCount) {
     }
 
     // Star-shaped sparks
-    for (let i = 0; i < 8; i++) {
-        const angle = (Math.PI * 2 / 8) * i;
+    for (let i = 0; i < sparkCount; i++) {
+        const angle = (Math.PI * 2 / sparkCount) * i;
         particles.push({
             x, y,
             vx: Math.cos(angle) * 10,
@@ -2894,7 +2911,7 @@ function createExplosion(x, y, color, count = CONFIG.particles.explosionCount) {
     }
 
     // Rising embers
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < emberCount; i++) {
         particles.push({
             x: x + (Math.random() - 0.5) * 20,
             y: y,
@@ -2908,7 +2925,7 @@ function createExplosion(x, y, color, count = CONFIG.particles.explosionCount) {
     }
 
     // Smoke cloud
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < smokeCount; i++) {
         particles.push({
             x: x + (Math.random() - 0.5) * 15,
             y: y + (Math.random() - 0.5) * 15,
@@ -3330,8 +3347,11 @@ function renderPlayer() {
     }
 
     // === OUTER GLOW AURA ===
-    ctx.shadowColor = glowColor;
-    ctx.shadowBlur = 30 + Math.sin(time * 5) * 10;
+    const playerGlow = getGlowBlur(25);
+    if (playerGlow > 0) {
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = playerGlow;
+    }
     ctx.beginPath();
     ctx.arc(0, 5, 35, 0, Math.PI * 2);
     ctx.fillStyle = `rgba(${hexToRgb(glowColor)}, 0.1)`;
@@ -3519,12 +3539,12 @@ function renderBullets() {
         ctx.globalAlpha = 1;
 
         // Critical hit glow
-        if (bullet.isCrit) {
-            ctx.shadowColor = '#ffff00';
-            ctx.shadowBlur = 20;
+        const glowVal = getGlowBlur(bullet.isCrit ? 18 : 10);
+        if (glowVal > 0) {
+            ctx.shadowColor = bullet.isCrit ? '#ffff00' : bulletColor;
+            ctx.shadowBlur = glowVal;
         } else {
-            ctx.shadowColor = bulletColor;
-            ctx.shadowBlur = 12;
+            ctx.shadowBlur = 0;
         }
 
         // Main bullet body
@@ -3559,8 +3579,13 @@ function renderEnemyBullets() {
         ctx.save();
         ctx.translate(b.x, b.y);
 
-        ctx.shadowColor = b.color;
-        ctx.shadowBlur = 10;
+        const eGlow = getGlowBlur(8);
+        if (eGlow > 0) {
+            ctx.shadowColor = b.color;
+            ctx.shadowBlur = eGlow;
+        } else {
+            ctx.shadowBlur = 0;
+        }
 
         ctx.beginPath();
         ctx.arc(0, 0, b.width / 2, 0, Math.PI * 2);
@@ -3607,11 +3632,21 @@ function renderEnemies() {
 
         // Elite enemy special glow
         if (enemy.elite) {
-            ctx.shadowColor = '#ff00aa';
-            ctx.shadowBlur = 25 + Math.sin(time * 8) * 10;
+            const glowVal = getGlowBlur(25 + Math.sin(time * 8) * 10);
+            if (glowVal > 0) {
+                ctx.shadowColor = '#ff00aa';
+                ctx.shadowBlur = glowVal;
+            } else {
+                ctx.shadowBlur = 0;
+            }
         } else {
-            ctx.shadowColor = enemy.color;
-            ctx.shadowBlur = 15;
+            const glowVal = getGlowBlur(15);
+            if (glowVal > 0) {
+                ctx.shadowColor = enemy.color;
+                ctx.shadowBlur = glowVal;
+            } else {
+                ctx.shadowBlur = 0;
+            }
         }
 
         // Draw enemy shape based on type
@@ -4062,43 +4097,51 @@ function renderPowerUps() {
 }
 
 function renderParticles() {
+    const isPerformanceMode = isMobile || gameSettings.particles === 'low';
+    const enableGlow = !isPerformanceMode && gameSettings.particles === 'high';
+
     particles.forEach(p => {
         const alpha = p.life / p.maxLife;
         ctx.save();
         ctx.globalAlpha = alpha;
 
+        if (enableGlow) {
+            ctx.shadowColor = p.color;
+            ctx.shadowBlur = 12;
+        }
+
         if (p.type === 'explosion' || p.type === 'pickup') {
-            // Enhanced explosion with motion blur effect
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
             ctx.fillStyle = p.color;
-            ctx.shadowColor = p.color;
-            ctx.shadowBlur = 15;
             ctx.fill();
 
-            // Motion trail
-            ctx.globalAlpha = alpha * 0.3;
-            ctx.beginPath();
-            ctx.arc(p.x - p.vx * 0.5, p.y - p.vy * 0.5, p.size * alpha * 0.7, 0, Math.PI * 2);
-            ctx.fill();
+            // Motion trail on desktop / high settings
+            if (!isPerformanceMode) {
+                ctx.globalAlpha = alpha * 0.3;
+                ctx.beginPath();
+                ctx.arc(p.x - p.vx * 0.5, p.y - p.vy * 0.5, p.size * alpha * 0.7, 0, Math.PI * 2);
+                ctx.fill();
+            }
         } else if (p.type === 'trail') {
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
-            const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
-            gradient.addColorStop(0, '#ffaa00');
-            gradient.addColorStop(0.5, '#ff4400');
-            gradient.addColorStop(1, 'transparent');
-            ctx.fillStyle = gradient;
+            if (isPerformanceMode) {
+                ctx.fillStyle = '#ff6600';
+            } else {
+                const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
+                gradient.addColorStop(0, '#ffaa00');
+                gradient.addColorStop(0.5, '#ff4400');
+                gradient.addColorStop(1, 'transparent');
+                ctx.fillStyle = gradient;
+            }
             ctx.fill();
         } else if (p.type === 'flash' || p.type === 'spark') {
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
             ctx.fillStyle = '#fff';
-            ctx.shadowColor = p.color;
-            ctx.shadowBlur = 15;
             ctx.fill();
         } else if (p.type === 'star_spark') {
-            // 4-pointed star shape
             ctx.translate(p.x, p.y);
             ctx.rotate(Math.atan2(p.vy, p.vx));
             ctx.beginPath();
@@ -4111,49 +4154,33 @@ function renderParticles() {
             }
             ctx.closePath();
             ctx.fillStyle = '#ffffff';
-            ctx.shadowColor = '#ffffff';
-            ctx.shadowBlur = 10;
             ctx.fill();
         } else if (p.type === 'ember') {
-            // Glowing ember that floats upward
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size * (0.5 + alpha * 0.5), 0, Math.PI * 2);
-            const emberGradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
-            emberGradient.addColorStop(0, '#ffffff');
-            emberGradient.addColorStop(0.3, p.color);
-            emberGradient.addColorStop(1, 'transparent');
-            ctx.fillStyle = emberGradient;
-            ctx.shadowColor = p.color;
-            ctx.shadowBlur = 8;
+            ctx.fillStyle = p.color;
             ctx.fill();
         } else if (p.type === 'smoke') {
-            // Semi-transparent expanding smoke cloud
-            ctx.globalAlpha = alpha * 0.4;
+            ctx.globalAlpha = alpha * 0.3;
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-            const smokeGradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size);
-            smokeGradient.addColorStop(0, 'rgba(80, 80, 80, 0.6)');
-            smokeGradient.addColorStop(0.5, 'rgba(60, 60, 60, 0.3)');
-            smokeGradient.addColorStop(1, 'transparent');
-            ctx.fillStyle = smokeGradient;
+            ctx.fillStyle = 'rgba(70, 70, 70, 0.4)';
             ctx.fill();
         } else if (p.type === 'ripple') {
-            // Expanding ring effect
             ctx.beginPath();
             ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
             ctx.strokeStyle = p.color;
             ctx.lineWidth = 3 * alpha;
-            ctx.shadowColor = p.color;
-            ctx.shadowBlur = 10;
             ctx.stroke();
         } else if (p.type === 'heal') {
-            // Rising heart particles
             ctx.font = `${p.size * 2}px Arial`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillStyle = p.color;
-            ctx.shadowColor = p.color;
-            ctx.shadowBlur = 10;
+            if (enableGlow) {
+                ctx.shadowColor = p.color;
+                ctx.shadowBlur = 8;
+            }
             ctx.fillText('❤', p.x, p.y);
         } else if (p.type === 'text') {
             // Floating damage/status text
@@ -4161,8 +4188,10 @@ function renderParticles() {
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillStyle = p.color;
-            ctx.shadowColor = p.color;
-            ctx.shadowBlur = 5;
+            if (enableGlow) {
+                ctx.shadowColor = p.color;
+                ctx.shadowBlur = 4;
+            }
             ctx.fillText(p.text || '', p.x, p.y);
         }
 
@@ -4303,7 +4332,7 @@ function updateDrones(timestamp) {
 
     drones.forEach((drone, i) => {
         // Orbit around player
-        drone.angle += CONFIG.drones.orbitSpeed * 0.01;
+        drone.angle += CONFIG.drones.orbitSpeed * 0.01 * timeScale;
         drone.x = player.x + Math.cos(drone.angle) * CONFIG.drones.orbitRadius;
         drone.y = player.y + Math.sin(drone.angle) * CONFIG.drones.orbitRadius;
 
