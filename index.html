@@ -101,6 +101,12 @@
                 <div class="ability-cooldown" id="cooldown-laser"></div>
                 <div class="ability-locked" id="locked-laser">LVL 5</div>
             </div>
+            <div class="ability-slot" id="ability-ultimate" data-ability="ultimate">
+                <div class="ability-icon">☄️</div>
+                <div class="ability-key">4</div>
+                <div class="ability-cooldown" id="cooldown-ultimate"></div>
+                <div class="ability-locked" id="locked-ultimate">LVL 10</div>
+            </div>
         </div>
 
         <!-- Audio Settings Button -->
@@ -209,6 +215,12 @@
                     <button id="mode-daily" class="mode-btn" data-mode="daily">
                         📅 DAILY
                     </button>
+                </div>
+
+                <!-- Daily Challenge Banner -->
+                <div id="daily-banner" class="daily-banner hidden">
+                    <div class="daily-title" id="daily-banner-title">📅 TODAY'S CHALLENGE</div>
+                    <div class="daily-desc" id="daily-banner-desc">Survive to Wave 10 to claim the reward</div>
                 </div>
 
                 <button id="start-btn" class="glow-btn">
@@ -562,6 +574,20 @@
             <div class="screen-content settings-content">
                 <h2 class="settings-title">⚙️ SETTINGS</h2>
                 <div class="settings-list">
+                    <div class="setting-item">
+                        <span class="setting-label">Music Volume</span>
+                        <div class="slider-container">
+                            <input type="range" id="setting-music" min="0" max="100" value="70" class="setting-range">
+                            <span class="range-val" id="setting-music-val">70%</span>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <span class="setting-label">SFX Volume</span>
+                        <div class="slider-container">
+                            <input type="range" id="setting-sfx" min="0" max="100" value="80" class="setting-range">
+                            <span class="range-val" id="setting-sfx-val">80%</span>
+                        </div>
+                    </div>
                     <div class="setting-item">
                         <span class="setting-label">Screen Shake</span>
                         <label class="toggle-switch">

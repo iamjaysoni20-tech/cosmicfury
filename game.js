@@ -257,6 +257,7 @@ let sessionPoints = 0;
 
 // Combo system
 let comboCount = 0;
+let comboTimer = 0;
 let comboMultiplier = 1;
 let lastKillTime = 0;
 let maxCombo = 0;
@@ -537,14 +538,14 @@ const MISSIONS = [
 
 // DAILY CHALLENGE DEFINITIONS
 const DAILY_MODIFIERS = [
-    { id: 'doubleSpeed', name: 'Double Speed', desc: 'Enemies move 2x faster', modifier: (config) => { config.enemy.baseSpeed *= 2; } },
-    { id: 'noAbilities', name: 'No Abilities', desc: 'Cannot use special abilities', modifier: () => { } },
-    { id: 'bossRush', name: 'Boss Rush', desc: 'Boss every wave', modifier: (config) => { config.boss.waveInterval = 1; } },
-    { id: 'glassCanon', name: 'Glass Canon', desc: '3x damage but 50% health', modifier: () => { } },
-    { id: 'bulletHell', name: 'Bullet Hell', desc: 'Enemies shoot 3x faster', modifier: () => { } },
-    { id: 'luckyDay', name: 'Lucky Day', desc: '3x power-up drops', modifier: (config) => { config.powerUp.spawnChance *= 3; } },
-    { id: 'noHealing', name: 'No Healing', desc: 'Cannot heal during game', modifier: () => { } },
-    { id: 'eliteOnly', name: 'Elite Only', desc: 'All enemies are elite', modifier: () => { } }
+    { id: 'doubleSpeed', name: 'Double Speed', desc: 'Enemies move 2x faster' },
+    { id: 'noAbilities', name: 'No Abilities', desc: 'Cannot use special abilities' },
+    { id: 'bossRush', name: 'Boss Rush', desc: 'Boss every wave' },
+    { id: 'glassCanon', name: 'Glass Cannon', desc: '3x damage but 50% health' },
+    { id: 'bulletHell', name: 'Bullet Hell', desc: 'Enemies shoot 3x faster' },
+    { id: 'luckyDay', name: 'Lucky Day', desc: '3x power-up drops' },
+    { id: 'noHealing', name: 'No Healing', desc: 'Cannot heal during game' },
+    { id: 'eliteOnly', name: 'Elite Only', desc: 'All enemies are elite' }
 ];
 
 // ============================================
@@ -564,6 +565,41 @@ function init() {
 
     // Mobile touch controls
     setupTouchControls();
+
+    // Special abilities click/touch listeners
+    document.querySelectorAll('.ability-slot').forEach(slot => {
+        slot.addEventListener('click', () => {
+            if (gameState !== 'playing') return;
+            const ability = slot.dataset.ability;
+            if (ability === 'ultimate') {
+                useUltimateAbility();
+            } else if (ability) {
+                useAbility(ability);
+            }
+        });
+    });
+
+    // Safe tab auto-pause & visibilitychange listener
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            if (gameState === 'playing') {
+                togglePause();
+            }
+        } else {
+            // Tab is visible again - reset lastTime to avoid huge delta jumps
+            lastTime = performance.now();
+        }
+    });
+
+    window.addEventListener('blur', () => {
+        if (gameState === 'playing') {
+            togglePause();
+        }
+    });
+
+    window.addEventListener('focus', () => {
+        lastTime = performance.now();
+    });
 
     document.getElementById('start-btn').addEventListener('click', startGame);
     document.getElementById('restart-btn').addEventListener('click', startGame);
@@ -682,6 +718,7 @@ function init() {
     }
 
     generateDailyChallenge();
+    updateDailyBannerUI();
 
     requestAnimationFrame(gameLoop);
 }
@@ -689,9 +726,23 @@ function init() {
 function resizeCanvas() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    if (player) {
+        player.x = Math.max(player.width / 2, Math.min(canvas.width - player.width / 2, player.x));
+    }
+    if (window.updateMobileControlsVisibility) window.updateMobileControlsVisibility();
 }
 
 function loadProgress() {
+    // Load daily challenge persistence
+    try {
+        const savedDaily = localStorage.getItem('cosmicFuryDaily');
+        if (savedDaily) {
+            const dailyData = JSON.parse(savedDaily);
+            lastDailyDate = dailyData.lastDailyDate || '';
+            dailyChallengeCompleted = !!dailyData.completed;
+        }
+    } catch (e) { }
+
     // Skip if a profile is already loaded (profile data takes precedence)
     if (currentProfile) return;
 
@@ -727,6 +778,13 @@ function saveProgress() {
     } else {
         localStorage.setItem('cosmicFuryMissions', JSON.stringify(missions));
     }
+
+    try {
+        localStorage.setItem('cosmicFuryDaily', JSON.stringify({
+            lastDailyDate: lastDailyDate,
+            completed: dailyChallengeCompleted
+        }));
+    } catch (e) { }
 }
 
 function updateMenuDisplay() {
@@ -757,6 +815,7 @@ function resetProgress() {
             localStorage.removeItem('cosmicFuryStats');
             localStorage.removeItem('cosmicFuryLeaderboard');
             localStorage.removeItem('cosmicFuryMissions');
+            localStorage.removeItem('cosmicFuryDaily');
             alert('✅ All data has been reset!');
             location.reload();
         }
@@ -1533,6 +1592,7 @@ function startGame() {
     waveTimer = 0;
 
     comboCount = 0;
+    comboTimer = 0;
     comboMultiplier = 1;
     maxCombo = 0;
     sessionXP = 0;
@@ -1627,6 +1687,11 @@ function gameOver() {
         gameStats.highestCombo = maxCombo;
     }
     saveStats();
+
+    // Daily challenge completion check on game over if wave >= 10
+    if (gameMode === 'daily' && wave >= 10 && !dailyChallengeCompleted) {
+        getDailyReward();
+    }
 
     checkMissions();
     // sessionXP is already counted per-kill via addXP, don't double-add
@@ -1729,9 +1794,9 @@ function initDistantPlanets() {
 }
 
 function updateStarfield() {
-    // Update stars with timeScale
+    // Update stars with timeScale (timeScale already includes gameSpeed)
     stars.forEach(star => {
-        star.y += star.speed * gameSpeed * 0.5 * timeScale;
+        star.y += star.speed * 0.5 * timeScale;
         if (star.y > canvas.height) {
             star.y = -5;
             star.x = Math.random() * canvas.width;
@@ -1740,8 +1805,8 @@ function updateStarfield() {
 
     // Update nebula clouds with timeScale
     nebulaClouds.forEach(cloud => {
-        cloud.y += cloud.speed * gameSpeed * timeScale;
-        cloud.x += cloud.driftX * gameSpeed * timeScale;
+        cloud.y += cloud.speed * timeScale;
+        cloud.x += cloud.driftX * timeScale;
         if (cloud.y > canvas.height + cloud.size) {
             cloud.y = -cloud.size;
             cloud.x = Math.random() * canvas.width;
@@ -1752,7 +1817,7 @@ function updateStarfield() {
 
     // Update distant planets with timeScale
     distantPlanets.forEach(planet => {
-        planet.y += planet.speed * gameSpeed * 0.3 * timeScale;
+        planet.y += planet.speed * 0.3 * timeScale;
         if (planet.y > canvas.height + planet.size) {
             planet.y = -planet.size * 2;
             planet.x = Math.random() * canvas.width;
@@ -1770,8 +1835,8 @@ function updateStarfield() {
         }
     }
 
-    // Randomly spawn shooting stars
-    if (Math.random() < 0.003 && shootingStars.length < 3) {
+    // Randomly spawn shooting stars (scaled for frame-rate independence)
+    if (Math.random() < 0.003 * timeScale && shootingStars.length < 3) {
         spawnShootingStar();
     }
 }
@@ -1915,13 +1980,14 @@ function gameLoop(timestamp) {
     let rawDelta = timestamp - lastTime;
     lastTime = timestamp;
 
-    // Safe delta-time cap: clamp between 0 and 64ms (avoids tunneling or jumping if frame drops/tab switch)
-    if (rawDelta > 64) rawDelta = 64;
-    if (rawDelta < 0) rawDelta = 0;
+    // Prevent negative, NaN, or sudden jump anomalies
+    if (rawDelta < 0 || isNaN(rawDelta)) rawDelta = 16.667;
+    // Safe delta-time cap: clamp max to 50ms (avoids tunneling or jumping if frame drops/tab switch)
+    if (rawDelta > 50) rawDelta = 50;
 
-    deltaTime = rawDelta * gameSpeed;
-    // Normalized time delta factor (1.0 = standard 60 FPS, i.e., 16.667ms)
-    timeScale = (rawDelta / 16.667) * gameSpeed;
+    deltaTime = rawDelta * (gameSpeed || 1);
+    // Normalized time delta factor (1.0 = standard 60 FPS, i.e., 16.666667ms), safely clamped
+    timeScale = Math.max(0, Math.min(deltaTime / 16.666667, 3.0));
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -1965,13 +2031,19 @@ function update(timestamp) {
         wave++;
         waveTimer = 0;
 
+        // Daily challenge completion check at wave 10
+        if (gameMode === 'daily' && wave >= 10 && !dailyChallengeCompleted) {
+            getDailyReward();
+        }
+
         updateEnvironment(); // Change environment every 5 waves
         if (wave > gameStats.highestWave) gameStats.highestWave = wave;
 
         // Wave announcement
         showWaveAnnouncement(wave);
 
-        if (wave % CONFIG.boss.waveInterval === 0) {
+        const bossInterval = (gameMode === 'daily' && dailyChallenge && dailyChallenge.id === 'bossRush') ? 1 : CONFIG.boss.waveInterval;
+        if (wave % bossInterval === 0) {
             spawnBoss();
         }
 
@@ -2021,22 +2093,25 @@ function updatePlayer(timestamp) {
 
     // Health regeneration (Aurora skin)
     if (bonuses.healthRegen && timestamp - lastRegenTime > (bonuses.regenInterval || 3000)) {
-        lastRegenTime = timestamp;
-        const maxHP = getMaxHealth();
-        if (player.health < maxHP) {
-            player.health = Math.min(maxHP, player.health + bonuses.healthRegen);
-            updateHUD();
-            // Small heal particle
-            particles.push({
-                x: player.x, y: player.y,
-                vx: 0, vy: -1,
-                size: 10, color: '#00ff88',
-                life: 0.5, maxLife: 0.5, type: 'heal'
-            });
+        if (!(gameMode === 'daily' && dailyChallenge && dailyChallenge.id === 'noHealing')) {
+            lastRegenTime = timestamp;
+            const maxHP = getMaxHealth();
+            if (player.health < maxHP) {
+                player.health = Math.min(maxHP, player.health + bonuses.healthRegen);
+                updateHUD();
+                // Small heal particle
+                particles.push({
+                    x: player.x, y: player.y,
+                    vx: 0, vy: -1,
+                    size: 10, color: '#00ff88',
+                    life: 0.5, maxLife: 0.5, type: 'heal'
+                });
+            }
         }
     }
 
-    if (Math.random() < 0.3) {
+    // Engine trail particle frequency scaled with timeScale for consistent look across 60/120/144 FPS
+    if (Math.random() < 0.3 * timeScale) {
         createTrailParticle(player.x, player.y + player.height / 2);
     }
 }
@@ -2055,6 +2130,11 @@ function shoot() {
     const critChance = upgrades.critical * 0.05;
     const isCrit = Math.random() < critChance;
     if (isCrit) baseDamage *= 2;
+
+    // Daily Challenge: Glass Cannon (3x damage)
+    if (gameMode === 'daily' && dailyChallenge && (dailyChallenge.id === 'glassCanon' || dailyChallenge.id === 'glassCannon')) {
+        baseDamage *= 3;
+    }
 
     const bulletConfig = {
         x: player.x,
@@ -2156,7 +2236,7 @@ function updateEnemyBullets() {
         const b = enemyBullets[i];
         b.x += b.vx * timeScale;
         b.y += b.vy * timeScale;
-        if (b.y > canvas.height || b.x < 0 || b.x > canvas.width) {
+        if (b.y > canvas.height + 50 || b.y < -50 || b.x < -50 || b.x > canvas.width + 50) {
             enemyBullets.splice(i, 1);
         }
     }
@@ -2176,14 +2256,15 @@ function updateEnemies(timestamp) {
 
     for (let i = enemies.length - 1; i >= 0; i--) {
         const enemy = enemies[i];
-        enemy.y += enemy.speed * gameSpeed * timeScale;
+        // timeScale already includes gameSpeed, avoid squaring gameSpeed
+        enemy.y += enemy.speed * timeScale;
 
         if (enemy.type === 'zigzag') {
             enemy.x += Math.sin(enemy.y * 0.05) * 3 * timeScale;
         } else if (enemy.type === 'teleporter') {
             enemy.x += Math.sin(enemy.y * 0.02 + enemy.offset) * 0.5 * timeScale;
-            // Teleport randomly
-            if (Math.random() < 0.003) {
+            // Teleport randomly (FPS-independent)
+            if (Math.random() < 0.003 * timeScale) {
                 const oldX = enemy.x;
                 const oldY = enemy.y;
                 enemy.x = Math.random() * (canvas.width - 100) + 50;
@@ -2194,7 +2275,9 @@ function updateEnemies(timestamp) {
             enemy.x += Math.sin(enemy.y * 0.02 + enemy.offset) * 0.5 * timeScale;
         }
 
-        if (enemy.shoots && Math.random() < 0.005) {
+        // Enemy shoot rate scaled with timeScale for consistent difficulty at 60/120/144 FPS
+        const shootChance = (gameMode === 'daily' && dailyChallenge && dailyChallenge.id === 'bulletHell') ? 0.015 : 0.005;
+        if ((enemy.shoots || (gameMode === 'daily' && dailyChallenge && dailyChallenge.id === 'bulletHell')) && Math.random() < shootChance * timeScale) {
             shootAtPlayer(enemy);
         }
 
@@ -2205,6 +2288,11 @@ function updateEnemies(timestamp) {
 }
 
 function spawnEnemy() {
+    if (gameMode === 'daily' && dailyChallenge && dailyChallenge.id === 'eliteOnly') {
+        spawnSingleEnemy('elite');
+        return;
+    }
+
     const types = Object.keys(CONFIG.enemy.types);
     let typeKey = 'basic';
 
@@ -2238,6 +2326,11 @@ function spawnSingleEnemy(typeKey) {
     const waveHealthScale = 1 + wave * CONFIG.enemy.healthScale;
     const scaledHealth = Math.ceil(type.health * waveHealthScale);
 
+    let enemySpeed = (CONFIG.enemy.baseSpeed + wave * 0.35) * speedMult;
+    if (gameMode === 'daily' && dailyChallenge && dailyChallenge.id === 'doubleSpeed') {
+        enemySpeed *= 2;
+    }
+
     enemies.push({
         x: Math.random() * (canvas.width - type.width * 2) + type.width,
         y: -type.height,
@@ -2247,7 +2340,7 @@ function spawnSingleEnemy(typeKey) {
         maxHealth: scaledHealth,
         points: type.points,
         color: type.color,
-        speed: (CONFIG.enemy.baseSpeed + wave * 0.35) * speedMult,
+        speed: enemySpeed,
         offset: Math.random() * Math.PI * 2,
         type: typeKey,
         xp: type.xp,
@@ -2303,6 +2396,11 @@ function spawnBoss() {
         ];
         const bossType = bossTypes[Math.floor((wave / 5 - 1) % bossTypes.length)];
 
+        let bossSpeed = CONFIG.boss.speed;
+        if (gameMode === 'daily' && dailyChallenge && dailyChallenge.id === 'doubleSpeed') {
+            bossSpeed *= 1.5;
+        }
+
         currentBoss = {
             x: canvas.width / 2,
             y: -CONFIG.boss.height,
@@ -2310,7 +2408,7 @@ function spawnBoss() {
             height: CONFIG.boss.height,
             health: bossHealth,
             maxHealth: bossHealth,
-            speed: CONFIG.boss.speed,
+            speed: bossSpeed,
             phase: 0,
             attackTimer: 0,
             moveDir: 1,
@@ -2342,7 +2440,10 @@ function updateBoss(timestamp) {
         currentBoss.x = Math.max(80, Math.min(canvas.width - 80, currentBoss.x));
 
         // Boss attacks faster in rage mode (below 30% HP)
-        const attackInterval = healthRatio < 0.3 ? 500 : (healthRatio < 0.6 ? 700 : 900);
+        let attackInterval = healthRatio < 0.3 ? 500 : (healthRatio < 0.6 ? 700 : 900);
+        if (gameMode === 'daily' && dailyChallenge && dailyChallenge.id === 'bulletHell') {
+            attackInterval = Math.floor(attackInterval / 3);
+        }
         currentBoss.attackTimer += deltaTime;
         if (currentBoss.attackTimer > attackInterval) {
             bossAttack();
@@ -2467,11 +2568,15 @@ function defeatBoss() {
 // COMBO SYSTEM
 // ============================================
 function updateCombo(timestamp) {
-    if (comboCount > 0 && timestamp - lastKillTime > CONFIG.combo.timeout) {
-        if (comboCount > 5) audioEngine.playComboBreak();
-        comboCount = 0;
-        comboMultiplier = 1;
-        document.getElementById('combo-container').classList.add('hidden');
+    if (comboCount > 0) {
+        // Delta-time safe combo decay (prevents losing combo during pause or lag spike)
+        comboTimer -= deltaTime;
+        if (comboTimer <= 0) {
+            if (comboCount > 5) audioEngine.playComboBreak();
+            comboCount = 0;
+            comboMultiplier = 1;
+            document.getElementById('combo-container').classList.add('hidden');
+        }
     }
 }
 
@@ -2479,6 +2584,7 @@ function addToCombo() {
     comboCount++;
     comboMultiplier = Math.min(1 + Math.floor(comboCount / 5), CONFIG.combo.maxMultiplier);
     lastKillTime = performance.now();
+    comboTimer = CONFIG.combo.timeout;
 
     if (comboCount > maxCombo) maxCombo = comboCount;
 
@@ -2543,6 +2649,7 @@ function updateXPBar() {
 // SPECIAL ABILITIES
 // ============================================
 function useAbility(type) {
+    if (gameMode === 'daily' && dailyChallenge && dailyChallenge.id === 'noAbilities') return;
     const config = CONFIG.abilities[type];
     if (playerLevel < config.unlockLevel) return;
     if (abilityCooldowns[type] > 0) return;
@@ -2621,11 +2728,13 @@ function updateAbilityCooldowns(timestamp) {
 }
 
 function updateAbilitiesUI() {
-    ['bomb', 'slowmo', 'laser'].forEach(type => {
+    ['bomb', 'slowmo', 'laser', 'ultimate'].forEach(type => {
         const config = CONFIG.abilities[type];
         const slot = document.getElementById(`ability-${type}`);
         const locked = document.getElementById(`locked-${type}`);
         const cooldown = document.getElementById(`cooldown-${type}`);
+
+        if (!slot || !locked || !cooldown) return;
 
         if (playerLevel >= config.unlockLevel) {
             locked.classList.add('hidden');
@@ -2732,7 +2841,10 @@ function processMissionQueue() {
 // ============================================
 function spawnPowerUp(x, y) {
     // Luck upgrade: +3% drop chance per level
-    const dropChance = CONFIG.powerUp.spawnChance + upgrades.luck * 0.03;
+    let dropChance = CONFIG.powerUp.spawnChance + upgrades.luck * 0.03;
+    if (gameMode === 'daily' && dailyChallenge && dailyChallenge.id === 'luckyDay') {
+        dropChance *= 3;
+    }
     if (Math.random() > dropChance) return;
 
     const types = Object.keys(CONFIG.powerUp.types);
@@ -2789,8 +2901,10 @@ function updatePowerUps(timestamp) {
         }
     }
 
+    // Decrement power-up duration by deltaTime (preserves power-ups during pause)
     for (const type in activePowerUps) {
-        if (timestamp > activePowerUps[type]) {
+        activePowerUps[type] -= deltaTime;
+        if (activePowerUps[type] <= 0) {
             delete activePowerUps[type];
         }
     }
@@ -2803,6 +2917,9 @@ function activatePowerUp(type, timestamp) {
     checkMissions();
 
     if (type === 'heal') {
+        if (gameMode === 'daily' && dailyChallenge && dailyChallenge.id === 'noHealing') {
+            return;
+        }
         // Instant heal - doesn't add to active power-ups
         const maxHealth = getMaxHealth();
         const healAmount = 40 + upgrades.shield * 5; // Bonus heal from shield upgrade
@@ -2826,7 +2943,7 @@ function activatePowerUp(type, timestamp) {
         return;
     }
 
-    activePowerUps[type] = timestamp + CONFIG.powerUp.duration;
+    activePowerUps[type] = CONFIG.powerUp.duration;
 
     if (type === 'shield') {
         player.health = Math.min(getMaxHealth(), player.health + 30);
@@ -3143,7 +3260,7 @@ function checkCollisions() {
 
                     // Vampiric healing (Blood Moon skin)
                     const bonuses = getSkinBonuses();
-                    if (bonuses.vampiric) {
+                    if (bonuses.vampiric && !(gameMode === 'daily' && dailyChallenge && dailyChallenge.id === 'noHealing')) {
                         const healAmount = Math.floor(getMaxHealth() * bonuses.vampiric);
                         player.health = Math.min(getMaxHealth(), player.health + healAmount);
                         // Heal particle
@@ -3401,7 +3518,7 @@ function renderPlayer() {
         ctx.strokeStyle = '#00ff88';
         ctx.lineWidth = 2;
         ctx.shadowColor = '#00ff88';
-        ctx.shadowBlur = 20;
+        ctx.shadowBlur = getGlowBlur(20);
         ctx.stroke();
         ctx.shadowBlur = 0;
     }
@@ -3430,7 +3547,7 @@ function renderPlayer() {
     bodyGradient.addColorStop(1, shadeColor(skin.secondary, -50));
     ctx.fillStyle = bodyGradient;
     ctx.shadowColor = glowColor;
-    ctx.shadowBlur = 25;
+    ctx.shadowBlur = getGlowBlur(25);
     ctx.fill();
 
     // Ship outline glow
@@ -3485,7 +3602,7 @@ function renderPlayer() {
 
     // Engine glow
     ctx.shadowColor = primaryColor;
-    ctx.shadowBlur = 10;
+    ctx.shadowBlur = getGlowBlur(10);
     ctx.beginPath();
     ctx.ellipse(-12, player.height / 2 - 3, 3, 2, 0, 0, Math.PI * 2);
     ctx.fillStyle = primaryColor;
@@ -3767,7 +3884,7 @@ function renderEnemies() {
         eyeGradient.addColorStop(1, '#880000');
         ctx.fillStyle = eyeGradient;
         ctx.shadowColor = '#ff0000';
-        ctx.shadowBlur = 8;
+        ctx.shadowBlur = getGlowBlur(8);
         ctx.fill();
         ctx.shadowBlur = 0;
 
@@ -3810,7 +3927,7 @@ function renderEnemies() {
             ctx.strokeStyle = enemy.shieldColor || '#00ccff';
             ctx.lineWidth = 2;
             ctx.shadowColor = enemy.shieldColor || '#00ccff';
-            ctx.shadowBlur = 12;
+            ctx.shadowBlur = getGlowBlur(12);
             ctx.globalAlpha = 0.5 + Math.sin(time * 8) * 0.2;
             ctx.stroke();
             ctx.globalAlpha = 1;
@@ -3879,7 +3996,7 @@ function renderBoss() {
             ctx.arc(Math.cos(angle) * dist, Math.sin(angle) * dist + 20, 4 + chargeIntensity * 3, 0, Math.PI * 2);
             ctx.fillStyle = `rgba(255, 100, 200, ${chargeIntensity * 0.8})`;
             ctx.shadowColor = '#ff00ff';
-            ctx.shadowBlur = 15;
+            ctx.shadowBlur = getGlowBlur(15);
             ctx.fill();
         }
         ctx.shadowBlur = 0;
@@ -3902,7 +4019,7 @@ function renderBoss() {
             satGradient.addColorStop(1, shadeColor(bossColor, -40));
             ctx.fillStyle = satGradient;
             ctx.shadowColor = bossColor;
-            ctx.shadowBlur = 10;
+            ctx.shadowBlur = getGlowBlur(10);
             ctx.fill();
         }
         ctx.shadowBlur = 0;
@@ -3938,7 +4055,7 @@ function renderBoss() {
 
     // Main glow
     ctx.shadowColor = currentBoss.color;
-    ctx.shadowBlur = 40 + Math.sin(time * 5) * 15;
+    ctx.shadowBlur = getGlowBlur(40 + Math.sin(time * 5) * 15);
 
     // === MAIN BODY ===
     ctx.beginPath();
@@ -4004,7 +4121,7 @@ function renderBoss() {
     ctx.arc(0, eyeY, eyeRadius, 0, Math.PI * 2);
     ctx.fillStyle = eyeGradient;
     ctx.shadowColor = '#ff0066';
-    ctx.shadowBlur = 20;
+    ctx.shadowBlur = getGlowBlur(20);
     ctx.fill();
     ctx.shadowBlur = 0;
 
@@ -4053,7 +4170,7 @@ function renderPowerUps() {
         const pulseSize = 1 + Math.sin(time * 8) * 0.15;
 
         ctx.shadowColor = pu.color;
-        ctx.shadowBlur = 25 + Math.sin(time * 6) * 8;
+        ctx.shadowBlur = getGlowBlur(25 + Math.sin(time * 6) * 8);
 
         // Rotating outer ring
         ctx.save();
@@ -4223,7 +4340,12 @@ function getMaxHealth() {
     if (bonuses.healthBonus) maxHP *= (1 + bonuses.healthBonus);
     if (bonuses.allStats) maxHP *= (1 + bonuses.allStats);
 
-    return Math.floor(maxHP);
+    // Daily Challenge: Glass Cannon (50% max health)
+    if (gameMode === 'daily' && dailyChallenge && (dailyChallenge.id === 'glassCanon' || dailyChallenge.id === 'glassCannon')) {
+        maxHP *= 0.5;
+    }
+
+    return Math.max(1, Math.floor(maxHP));
 }
 
 function updateHUD() {
@@ -4370,7 +4492,7 @@ function renderDrones() {
 
         // Drone glow
         ctx.shadowColor = skin.glow;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = getGlowBlur(10);
 
         // Drone body
         ctx.beginPath();
@@ -4399,6 +4521,26 @@ function setGameMode(mode) {
     if (mode === 'daily') {
         generateDailyChallenge();
     }
+    updateDailyBannerUI();
+}
+
+function updateDailyBannerUI() {
+    const banner = document.getElementById('daily-banner');
+    if (!banner) return;
+    if (gameMode === 'daily') {
+        generateDailyChallenge();
+        const titleEl = document.getElementById('daily-banner-title');
+        const descEl = document.getElementById('daily-banner-desc');
+        if (titleEl && dailyChallenge) {
+            titleEl.textContent = `📅 TODAY'S CHALLENGE: ${dailyChallenge.name.toUpperCase()}` + (dailyChallengeCompleted ? ' (COMPLETED ✅)' : '');
+        }
+        if (descEl && dailyChallenge) {
+            descEl.textContent = `${dailyChallenge.desc} • Survive to Wave 10 to earn rewards!`;
+        }
+        banner.classList.remove('hidden');
+    } else {
+        banner.classList.add('hidden');
+    }
 }
 
 function generateDailyChallenge() {
@@ -4406,11 +4548,15 @@ function generateDailyChallenge() {
     if (lastDailyDate !== today) {
         // Generate new daily challenge based on date seed
         const seed = today.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-        const modifierIndex = seed % DAILY_MODIFIERS.length;
+        const modifierIndex = Math.abs(seed) % DAILY_MODIFIERS.length;
         dailyChallenge = DAILY_MODIFIERS[modifierIndex];
         dailyChallengeCompleted = false;
         lastDailyDate = today;
         saveProgress();
+    } else if (!dailyChallenge) {
+        const seed = today.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+        const modifierIndex = Math.abs(seed) % DAILY_MODIFIERS.length;
+        dailyChallenge = DAILY_MODIFIERS[modifierIndex];
     }
 }
 
@@ -4419,7 +4565,34 @@ function getDailyReward() {
         dailyChallengeCompleted = true;
         const reward = 500 + (wave * 50);
         points += reward;
+        sessionPoints += reward;
         saveProgress();
+        updateMenuDisplay();
+        updateHUD();
+        updateDailyBannerUI();
+
+        // Celebration banner popup
+        const popup = document.createElement('div');
+        popup.className = 'wave-announcement';
+        popup.innerHTML = `
+            <div class="wave-title" style="color: #ffcc00; text-shadow: 0 0 20px #ffcc00;">🏆 DAILY COMPLETED!</div>
+            <div class="wave-subtitle">+${reward.toLocaleString()} BONUS POINTS AWARDED</div>
+        `;
+        popup.style.cssText = `
+            position: absolute;
+            top: 25%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 100;
+            pointer-events: none;
+            animation: wavePop 2.5s ease-out forwards;
+        `;
+        const container = document.getElementById('game-container');
+        if (container) container.appendChild(popup);
+        audioEngine.playLevelUp();
+        setTimeout(() => popup.remove(), 2500);
+
         return reward;
     }
     return 0;
@@ -4538,6 +4711,12 @@ function loadSettings() {
         const saved = localStorage.getItem('cosmicFurySettings');
         if (saved) {
             gameSettings = { ...gameSettings, ...JSON.parse(saved) };
+            if (gameSettings.musicVolume !== undefined) {
+                audioEngine.setMusicVolume(gameSettings.musicVolume);
+            }
+            if (gameSettings.sfxVolume !== undefined) {
+                audioEngine.setSfxVolume(gameSettings.sfxVolume);
+            }
         }
     } catch (e) { }
 }
@@ -4550,6 +4729,11 @@ function updateSetting(key, value) {
     if (gameSettings[key] !== undefined) {
         gameSettings[key] = value;
         saveSettings();
+        if (key === 'musicVolume') {
+            audioEngine.setMusicVolume(value);
+        } else if (key === 'sfxVolume') {
+            audioEngine.setSfxVolume(value);
+        }
     }
 }
 
@@ -4618,6 +4802,7 @@ function handleSplitterDeath(enemy) {
 // ULTIMATE ABILITY
 // ============================================
 function useUltimateAbility() {
+    if (gameMode === 'daily' && dailyChallenge && dailyChallenge.id === 'noAbilities') return;
     if (playerLevel < CONFIG.abilities.ultimate.unlockLevel) return;
     if (abilityCooldowns.ultimate > 0) return;
 
@@ -4768,6 +4953,34 @@ function openSettingsScreen() {
     document.getElementById('setting-dmgnums').checked = gameSettings.showDamageNumbers;
     document.getElementById('setting-autofire').checked = gameSettings.autoFire;
     document.getElementById('setting-particles').value = gameSettings.particles;
+
+    // Music & SFX sliders
+    const musicSlider = document.getElementById('setting-music');
+    const sfxSlider = document.getElementById('setting-sfx');
+    const musicVal = document.getElementById('setting-music-val');
+    const sfxVal = document.getElementById('setting-sfx-val');
+
+    if (musicSlider) {
+        const curMusic = (audioEngine.volumes && audioEngine.volumes.music !== undefined) ? audioEngine.volumes.music : (gameSettings.musicVolume !== undefined ? gameSettings.musicVolume : 0.7);
+        musicSlider.value = Math.round(curMusic * 100);
+        if (musicVal) musicVal.textContent = `${musicSlider.value}%`;
+        musicSlider.oninput = (e) => {
+            const val = parseInt(e.target.value, 10);
+            if (musicVal) musicVal.textContent = `${val}%`;
+            updateSetting('musicVolume', val / 100);
+        };
+    }
+
+    if (sfxSlider) {
+        const curSfx = (audioEngine.volumes && audioEngine.volumes.sfx !== undefined) ? audioEngine.volumes.sfx : (gameSettings.sfxVolume !== undefined ? gameSettings.sfxVolume : 0.8);
+        sfxSlider.value = Math.round(curSfx * 100);
+        if (sfxVal) sfxVal.textContent = `${sfxSlider.value}%`;
+        sfxSlider.oninput = (e) => {
+            const val = parseInt(e.target.value, 10);
+            if (sfxVal) sfxVal.textContent = `${val}%`;
+            updateSetting('sfxVolume', val / 100);
+        };
+    }
 
     // Add change listeners
     document.getElementById('setting-shake').onchange = (e) => updateSetting('screenShake', e.target.checked);

@@ -1878,6 +1878,63 @@ body.slowmo .stars-layer {
     color: #fff;
 }
 
+/* Slider Controls */
+.slider-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.setting-range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 140px;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.setting-range:hover {
+    background: rgba(255, 255, 255, 0.35);
+}
+
+.setting-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--primary);
+    box-shadow: var(--glow-primary);
+    cursor: pointer;
+    transition: transform 0.1s ease;
+}
+
+.setting-range::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+}
+
+.setting-range::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--primary);
+    box-shadow: var(--glow-primary);
+    cursor: pointer;
+    border: none;
+}
+
+.range-val {
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    color: var(--primary);
+    min-width: 40px;
+    text-align: right;
+}
+
 /* Toggle Switch */
 .toggle-switch {
     position: relative;
